@@ -205,3 +205,48 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Dependencies
+node_modules/
+*.log
+package-lock.json
+yarn.lock
+
+# Expo (if applicable)
+.expo/
+dist/
+
+# Android
+.gradle/
+build/
+*.iml
+*.keystore
+!debug.keystore
+local.properties
+
+# iOS
+build/
+DerivedData/
+Pods/
+*.xcworkspace
+!contents.xcworkspacedata
+.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscheme
+!default.xcscheme
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
