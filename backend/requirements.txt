@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+pandas
+numpy
+opencv-python
+pytesseract
+matplotlib
