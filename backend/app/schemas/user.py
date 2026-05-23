@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
-from datetime import date
+from datetime import datetime
 from typing import Optional
-
+from app.model.enums import UserRole  
 class UserBase(BaseModel):
     username: str
     role: str = "user"
@@ -18,6 +18,9 @@ class UserOut(UserBase):
     user_id: int
     username: str
     role: str
-    created_date: date
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
     
-    model = ConfigDict(from_attributes=True)
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
