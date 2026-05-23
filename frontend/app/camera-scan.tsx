@@ -46,7 +46,7 @@ export default function CameraScanScreen() {
         base64: false,
       });
       // Navigate to preview or process result
-      // router.push({ pathname: '/scan-preview', params: { uri: photo?.uri } });
+      router.push({ pathname: '/scan-preview', params: { uri: photo?.uri } });
       console.log('Photo taken:', photo?.uri);
     } catch (err) {
       console.error('Capture error:', err);
