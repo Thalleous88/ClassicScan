@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   }, 
   heroCard: {
     width: '100%',
-    height: 900,
+    height: height * 0.38,
     borderRadius: 30,
     overflow: 'hidden',
     marginBottom: 36,

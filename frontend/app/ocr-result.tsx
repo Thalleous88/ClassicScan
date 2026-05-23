@@ -1,26 +1,20 @@
-import { useState } from 'react';
-
 import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   View,
-  TextInput,
 } from 'react-native';
 
-import * as Clipboard from 'expo-clipboard';
-
 import { router } from 'expo-router';
+
+import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
 export default function OCRResultScreen() {
-
-  const [copied, setCopied] = useState(false);
-
-  // dummy aja
-  const [ocrText, setOcrText] = useState(`
+console.log("NEW OCR RESULT");
+  const ocrText = `
 ALEX RIVERA
 Creative Director & Digital Archivist
 
@@ -35,18 +29,23 @@ The 2023 Quarterly Digital Review
 focuses on the implementation of
 minimalist UX principles across
 corporate archiving tools.
-  `);
+`;
 
-  async function handleCopy() {
+  const handleSavePdf = () => {
 
-    await Clipboard.setStringAsync(ocrText);
+  console.log('Save PDF');
 
-    setCopied(true);
+  router.navigate('/(tabs)/history');
 
-    setTimeout(() => {
-      setCopied(false);
-    }, 2000);
-  }
+};
+
+  const handleSaveDoc = () => {
+
+  console.log('Save DOC');
+
+  router.navigate('/(tabs)/history');
+
+};
 
   return (
 
@@ -54,13 +53,9 @@ corporate archiving tools.
 
       <View style={styles.header}>
 
-        <TextInput
-        multiline
-        value={ocrText}
-        onChangeText={setOcrText}
-        style={styles.ocrInput}
-        textAlignVertical="top"
-        />
+        <ThemedText style={styles.logo}>
+          ClassicScan
+        </ThemedText>
 
       </View>
 
@@ -83,27 +78,45 @@ corporate archiving tools.
 
       </View>
 
-      <TouchableOpacity
-        style={styles.copyButton}
-        onPress={handleCopy}
-      >
+      <View style={styles.buttonRow}>
 
-        <ThemedText style={styles.copyText}>
-            {copied ? 'Copied!' : 'Copy'}
-        </ThemedText>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={handleSaveDoc}
+          activeOpacity={0.85}
+        >
 
-      </TouchableOpacity>
+          <Ionicons
+            name="document-text-outline"
+            size={20}
+            color="#0F5C4D"
+          />
 
-      <TouchableOpacity
-        style={styles.nextButton}
-        onPress={() => router.navigate('/(tabs)/history')}
-      >
+          <ThemedText style={styles.secondaryButtonText}>
+            Save as DOC
+          </ThemedText>
 
-        <ThemedText style={styles.nextText}>
-          Next
-        </ThemedText>
+        </TouchableOpacity>
 
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={handleSavePdf}
+          activeOpacity={0.85}
+        >
+
+          <Ionicons
+            name="download-outline"
+            size={20}
+            color="white"
+          />
+
+          <ThemedText style={styles.primaryButtonText}>
+            Save as PDF
+          </ThemedText>
+
+        </TouchableOpacity>
+
+      </View>
 
     </ThemedView>
   );
@@ -154,35 +167,46 @@ const styles = StyleSheet.create({
     color: '#333',
   },
 
-  ocrInput: {
-    fontSize: 16,
-    lineHeight: 28,
-    color: '#333',
-    minHeight: 400,
-  },
-
-  copyButton: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-
-  copyText: {
-    color: '#777',
-    fontSize: 15,
-  },
-
-  nextButton: {
-    backgroundColor: '#0F5C4D',
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 14,
     marginTop: 20,
     marginBottom: 40,
   },
 
-  nextText: {
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#DCDCDC',
+  },
+
+  secondaryButtonText: {
+    color: '#0F5C4D',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  primaryButton: {
+    flex: 1,
+    backgroundColor: '#0F5C4D',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+
+  primaryButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
 
