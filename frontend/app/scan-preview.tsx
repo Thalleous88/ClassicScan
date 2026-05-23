@@ -18,7 +18,14 @@ export default function ScanPreviewScreen() {
   const { uri } = useLocalSearchParams<{ uri: string }>();
 
   const handleExtractText = () => {
-    // TODO: implement OCR
+
+    router.push({
+      pathname: '/processing',
+      params: {
+        imageUri: uri,
+      },
+    });
+
     console.log('Extract text pressed');
   };
 

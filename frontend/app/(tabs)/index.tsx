@@ -1,84 +1,132 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import {
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { router } from 'expo-router';
+
+import { Ionicons } from '@expo/vector-icons';
+
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
 export default function HomeScreen() {
-  const router = useRouter();
 
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
 
-      {/* Tombol buka camera scan */}
+    <ThemedView style={styles.container}>
+
+      <View style={styles.header}>
+
+        <ThemedText style={styles.logo}>
+          ClassicScan
+        </ThemedText>
+
+        <ThemedText style={styles.subtitle}>
+          Smart document scanner & OCR extraction
+        </ThemedText>
+
+      </View>
+
       <TouchableOpacity
         style={styles.scanButton}
-        onPress={() => router.push('/camera-scan')}
-        activeOpacity={0.8}>
-        <ThemedText style={styles.scanButtonText}>📄 Scan Dokumen</ThemedText>
+        onPress={() => router.push('/camera-scan' as any)}
+        activeOpacity={0.85}
+      >
+
+        <Ionicons
+          name="scan-outline"
+          size={28}
+          color="white"
+        />
+
+        <ThemedText style={styles.scanButtonText}>
+          Scan Document
+        </ThemedText>
+
       </TouchableOpacity>
 
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
+      <TouchableOpacity
+        style={styles.historyButton}
+        onPress={() => router.navigate('/(tabs)/history')}
+        activeOpacity={0.85}
+      >
+
+        <Ionicons
+          name="time-outline"
+          size={24}
+          color="#0F5C4D"
+        />
+
+        <ThemedText style={styles.historyButtonText}>
+          View History
         </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+
+      </TouchableOpacity>
+
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+
+  container: {
+    flex: 1,
+    backgroundColor: '#F4F1E8',
+    paddingHorizontal: 24,
+    justifyContent: 'center',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  header: {
+    marginBottom: 48,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+
+  logo: {
+    fontSize: 42,
+    fontWeight: '700',
+    color: '#0F5C4D',
   },
+
+  subtitle: {
+    marginTop: 12,
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#666',
+  },
+
   scanButton: {
-    backgroundColor: '#1a5c46',
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    backgroundColor: '#0F5C4D',
+    borderRadius: 22,
+    paddingVertical: 26,
     alignItems: 'center',
-    marginVertical: 8,
+    justifyContent: 'center',
+    gap: 12,
   },
+
   scanButtonText: {
-    color: '#fff',
+    color: 'white',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+
+  historyButton: {
+    marginTop: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+
+  historyButtonText: {
+    color: '#0F5C4D',
     fontSize: 16,
     fontWeight: '600',
   },
+
 });
