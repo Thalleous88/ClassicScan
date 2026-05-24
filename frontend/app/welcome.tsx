@@ -2,34 +2,42 @@ import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
-  TouchableOpacity,
   Animated,
   Dimensions,
-  StatusBar,
   Image,
-  ScrollView
+  ScrollView,
+  StatusBar,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+
+import { Button } from '@/components/button';
+import { Eyebrow } from '@/components/card';
+import { Tokens } from '@/constants/theme';
+import { useAuth } from '@/lib/auth';
 
 const { height } = Dimensions.get('window');
 const welcomeImage = require('../assets/images/welcome.png');
 
 export default function WelcomeScreen() {
-  const logoAnim  = useRef(new Animated.Value(0)).current;
-  const titleAnim = useRef(new Animated.Value(0)).current;
-  const cardAnim  = useRef(new Animated.Value(0)).current;
-  const btnAnim   = useRef(new Animated.Value(0)).current;
+  const { loaded, token } = useAuth();
+  const eyebrowAnim = useRef(new Animated.Value(0)).current;
+  const titleAnim   = useRef(new Animated.Value(0)).current;
+  const cardAnim    = useRef(new Animated.Value(0)).current;
+  const btnAnim     = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.stagger(140, [
-      Animated.spring(logoAnim,  { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
-      Animated.spring(titleAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
-      Animated.spring(cardAnim,  { toValue: 1, useNativeDriver: true, tension: 50, friction: 9 }),
-      Animated.spring(btnAnim,   { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
+      Animated.spring(eyebrowAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
+      Animated.spring(titleAnim,   { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
+      Animated.spring(cardAnim,    { toValue: 1, useNativeDriver: true, tension: 50, friction: 9 }),
+      Animated.spring(btnAnim,     { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
     ]).start();
-  }, []);
+  }, [eyebrowAnim, titleAnim, cardAnim, btnAnim]);
+
+  useEffect(() => {
+    if (loaded && token) router.replace('/(tabs)/home');
+  }, [loaded, token]);
 
   const fadeSlide = (anim: Animated.Value, offsetY = 24) => ({
     opacity: anim,
@@ -38,138 +46,89 @@ export default function WelcomeScreen() {
     }],
   });
 
-  const logoScale = {
-    opacity: logoAnim,
-    transform: [{
-      scale: logoAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }),
-    }],
-  };
-
   return (
     <ScrollView
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}
+      contentContainerStyle={{
+        flexGrow: 1,
+        backgroundColor: Tokens.bg,
+        paddingHorizontal: 24,
+        paddingTop: 88,
+        paddingBottom: 48,
+      }}
+      showsVerticalScrollIndicator={false}
     >
-      <StatusBar barStyle="dark-content" backgroundColor="#F4F1E8" />
+      <StatusBar barStyle="light-content" backgroundColor={Tokens.bg} />
 
-      <Animated.View style={[styles.logoWrapper, logoScale]}>
-        <View style={styles.logoBox}>
-          <Ionicons name="document-text" size={65} color="#0F5C4D" />
+      <Animated.View style={fadeSlide(eyebrowAnim, 12)}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ width: 18, height: 1, backgroundColor: Tokens.accent }} />
+          <Eyebrow tone="accent">Document scanner</Eyebrow>
         </View>
       </Animated.View>
 
-      <Animated.View style={[styles.titleWrapper, fadeSlide(titleAnim, 16)]}>
-        <Text style={styles.title}>ClassicScan</Text>
-        <Text style={styles.subtitle}>Scan, Enhance, Extract</Text>
-      </Animated.View>
-
-      <Animated.View style={[styles.heroCard, fadeSlide(cardAnim, 40)]}>
-          <Image
-            source={welcomeImage}
-            style={styles.heroImage}
-            resizeMode="cover"
-          />
-      </Animated.View>
-
-      <Animated.View style={[styles.btnWrapper, fadeSlide(btnAnim, 20)]}>
-        <TouchableOpacity
-          style={styles.ctaButton}
-          activeOpacity={0.85}
-          onPress={() => router.replace('/(tabs)/home')}
+      <Animated.View style={[{ marginTop: 18, marginBottom: 28 }, fadeSlide(titleAnim, 16)]}>
+        <Text
+          style={{
+            color: Tokens.ink,
+            fontFamily: 'PlusJakartaSans_700Bold',
+            fontSize: 44,
+            lineHeight: 48,
+            letterSpacing: -1,
+          }}
         >
-          <Text style={styles.ctaText}>Get Started</Text>
-          <Ionicons name="arrow-forward" size={20} color="#fff" />
-        </TouchableOpacity>
+          Capture pages.{'\n'}
+          <Text style={{ color: Tokens.accent }}>Read the words.</Text>
+        </Text>
+        <Text
+          style={{
+            color: Tokens.inkMuted,
+            fontFamily: 'PlusJakartaSans_400Regular',
+            fontSize: 15,
+            lineHeight: 22,
+            marginTop: 14,
+            maxWidth: 320,
+          }}
+        >
+          On-device OCR with scanner-grade enhancement. Every scan
+          synchronises across your devices.
+        </Text>
       </Animated.View>
 
+      <Animated.View
+        style={[
+          {
+            width: '100%',
+            height: height * 0.34,
+            borderRadius: 20,
+            overflow: 'hidden',
+            borderWidth: 1,
+            borderColor: Tokens.hairline,
+            backgroundColor: Tokens.surface,
+            marginBottom: 28,
+          },
+          fadeSlide(cardAnim, 40),
+        ]}
+      >
+        <Image
+          source={welcomeImage}
+          style={{ width: '100%', height: '100%' }}
+          resizeMode="cover"
+        />
+      </Animated.View>
+
+      <Animated.View style={[{ width: '100%', gap: 12 }, fadeSlide(btnAnim, 20)]}>
+        <Button
+          label="Sign in"
+          variant="primary"
+          onPress={() => router.push({ pathname: '/sign-in' })}
+          trailing={<Ionicons name="arrow-forward" size={18} color={Tokens.accentInk} />}
+        />
+        <Button
+          label="Create account"
+          variant="secondary"
+          onPress={() => router.push({ pathname: '/sign-up' })}
+        />
+      </Animated.View>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-
-  container: {
-    flex: 1,
-    backgroundColor: '#F4F1E8',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 64,
-    paddingBottom: 48,
-  },
-
-  logoWrapper: {
-    marginBottom: 55,
-  },
-  logoBox: {
-    width: 130,
-    height: 130,
-    borderRadius: 30,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-
-  titleWrapper: {
-    alignItems: 'center',
-    marginBottom: 36,
-  },
-  title: {
-    fontSize: 45,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    letterSpacing: -0.5,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 20,
-    color: '#888',
-    letterSpacing: 0.3,
-  },
-
-  heroImage: {
-    width: '100%',
-    height: '100%',
-  }, 
-  heroCard: {
-    width: '100%',
-    height: height * 0.38,
-    borderRadius: 30,
-    overflow: 'hidden',
-    marginBottom: 36,
-    shadowColor: '#0F5C4D',
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-  },
-
-  btnWrapper: {
-    width: '100%',
-  },
-  ctaButton: {
-    width: '100%',
-    height: 58,
-    backgroundColor: '#0F5C4D',
-    borderRadius: 29,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    shadowColor: '#0F5C4D',
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
-  ctaText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-});

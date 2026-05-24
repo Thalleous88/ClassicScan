@@ -1,294 +1,416 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   Dimensions,
   StatusBar,
-  Platform,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { CameraView, CameraType, FlashMode, useCameraPermissions } from 'expo-camera';
+import { CameraView, FlashMode, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Button } from '@/components/button';
+import { Eyebrow } from '@/components/card';
+import { Tokens } from '@/constants/theme';
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+const CAMERA_WIDTH = SCREEN_WIDTH;
+const CAMERA_HEIGHT = Math.min(SCREEN_WIDTH * (4 / 3), SCREEN_HEIGHT);
+const CAMERA_TOP = Math.max(0, (SCREEN_HEIGHT - CAMERA_HEIGHT) / 2);
+
 const FRAME_PADDING = 32;
-const FRAME_WIDTH = SCREEN_WIDTH - FRAME_PADDING * 2;
-const FRAME_HEIGHT = FRAME_WIDTH * 1.414; // A4 ratio
-const CORNER_SIZE = 28;
-const CORNER_THICKNESS = 3;
+const A4_RATIO = 1.414;
+let _bracketW = CAMERA_WIDTH - FRAME_PADDING * 2;
+let _bracketH = _bracketW * A4_RATIO;
+const MAX_BRACKET_H = CAMERA_HEIGHT - 32;
+if (_bracketH > MAX_BRACKET_H) {
+  _bracketH = MAX_BRACKET_H;
+  _bracketW = _bracketH / A4_RATIO;
+}
+const BRACKET_W = _bracketW;
+const BRACKET_H = _bracketH;
+const BRACKET_LEFT = (CAMERA_WIDTH - BRACKET_W) / 2;
+const BRACKET_TOP = (CAMERA_HEIGHT - BRACKET_H) / 2;
 
 export default function CameraScanScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [flashMode, setFlashMode] = useState<FlashMode>('off');
+  const [error, setError] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
 
   useEffect(() => {
     if (!permission?.granted) {
       requestPermission();
     }
-  }, []);
+  }, [permission?.granted, requestPermission]);
 
   const toggleFlash = () => {
     setFlashMode((prev) => (prev === 'off' ? 'on' : 'off'));
   };
 
   const handleCapture = async () => {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current || capturing) return;
+    setError(null);
+    setCapturing(true);
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 1,
         base64: false,
+        exif: false,
       });
-      // Navigate to preview or process result
-      router.push({ pathname: '/scan-preview', params: { uri: photo?.uri } });
-      console.log('Photo taken:', photo?.uri);
-    } catch (err) {
-      console.error('Capture error:', err);
+
+      if (!photo?.uri) {
+        setError('Capture failed: no image returned');
+        setCapturing(false);
+        return;
+      }
+
+      router.push({
+        pathname: '/scan-preview',
+        params: {
+          uri: photo.uri,
+        },
+      });
+    } catch (err: any) {
+      setError(err?.message ?? 'Capture failed');
+    } finally {
+      setCapturing(false);
     }
   };
 
-  if (!permission) return <View style={styles.container} />;
+  if (!permission) return <View style={{ flex: 1, backgroundColor: Tokens.bg }} />;
 
   if (!permission.granted) {
     return (
-      <View style={[styles.container, styles.permissionContainer]}>
-        <Text style={styles.permissionText}>Izin kamera diperlukan untuk scan dokumen.</Text>
-        <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-          <Text style={styles.permissionButtonText}>Izinkan Kamera</Text>
-        </TouchableOpacity>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: Tokens.bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 32,
+          gap: 20,
+        }}
+      >
+        <View
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            backgroundColor: Tokens.surface,
+            borderWidth: 1,
+            borderColor: Tokens.hairline,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="camera-outline" size={26} color={Tokens.inkMuted} />
+        </View>
+        <View style={{ alignItems: 'center', gap: 6 }}>
+          <Eyebrow>Camera access</Eyebrow>
+          <Text
+            style={{
+              color: Tokens.ink,
+              fontFamily: 'PlusJakartaSans_700Bold',
+              fontSize: 22,
+              textAlign: 'center',
+            }}
+          >
+            Permission required
+          </Text>
+          <Text
+            style={{
+              color: Tokens.inkMuted,
+              fontFamily: 'PlusJakartaSans_400Regular',
+              fontSize: 14,
+              textAlign: 'center',
+            }}
+          >
+            Allow ClassicScan to use your camera to capture documents.
+          </Text>
+        </View>
+        <Button label="Allow camera" variant="primary" onPress={requestPermission} />
       </View>
     );
   }
 
-  const frameTop = (SCREEN_HEIGHT - FRAME_HEIGHT) / 2 - 40;
-
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: Tokens.bg }}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      {/* Camera */}
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        flash={flashMode}
-      />
+      {}
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: CAMERA_TOP,
+          width: CAMERA_WIDTH,
+          height: CAMERA_HEIGHT,
+          backgroundColor: '#000',
+          overflow: 'hidden',
+        }}
+      >
+        <CameraView
+          ref={cameraRef}
+          style={{ flex: 1 }}
+          facing="back"
+          flash={flashMode}
+        />
 
-      {/* Dark overlay — top */}
-      <View style={[styles.overlay, { height: frameTop }]} />
+        {}
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            height: BRACKET_TOP,
+            backgroundColor: 'rgba(0,0,0,0.62)',
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: BRACKET_TOP + BRACKET_H,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.62)',
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: BRACKET_TOP,
+            width: BRACKET_LEFT,
+            height: BRACKET_H,
+            backgroundColor: 'rgba(0,0,0,0.62)',
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: BRACKET_TOP,
+            width: CAMERA_WIDTH - BRACKET_LEFT - BRACKET_W,
+            height: BRACKET_H,
+            backgroundColor: 'rgba(0,0,0,0.62)',
+          }}
+        />
 
-      {/* Middle row: dark sides + frame */}
-      <View style={[styles.middleRow, { top: frameTop, height: FRAME_HEIGHT }]}>
-        <View style={[styles.overlaySide, { width: FRAME_PADDING }]} />
+        {}
+        <View
+          style={{
+            position: 'absolute',
+            left: BRACKET_LEFT,
+            top: BRACKET_TOP,
+            width: 28,
+            height: 28,
+            borderTopWidth: 2,
+            borderLeftWidth: 2,
+            borderColor: Tokens.accent,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: BRACKET_LEFT + BRACKET_W - 28,
+            top: BRACKET_TOP,
+            width: 28,
+            height: 28,
+            borderTopWidth: 2,
+            borderRightWidth: 2,
+            borderColor: Tokens.accent,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: BRACKET_LEFT,
+            top: BRACKET_TOP + BRACKET_H - 28,
+            width: 28,
+            height: 28,
+            borderBottomWidth: 2,
+            borderLeftWidth: 2,
+            borderColor: Tokens.accent,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: BRACKET_LEFT + BRACKET_W - 28,
+            top: BRACKET_TOP + BRACKET_H - 28,
+            width: 28,
+            height: 28,
+            borderBottomWidth: 2,
+            borderRightWidth: 2,
+            borderColor: Tokens.accent,
+          }}
+        />
 
-        {/* Transparent frame area */}
-        <View style={{ width: FRAME_WIDTH, height: FRAME_HEIGHT }}>
-          {/* Corner: top-left */}
-          <View style={[styles.corner, styles.cornerTopLeft]} />
-          {/* Corner: top-right */}
-          <View style={[styles.corner, styles.cornerTopRight]} />
-          {/* Corner: bottom-left */}
-          <View style={[styles.corner, styles.cornerBottomLeft]} />
-          {/* Corner: bottom-right */}
-          <View style={[styles.corner, styles.cornerBottomRight]} />
+        {}
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: BRACKET_TOP + BRACKET_H - 40,
+            alignItems: 'center',
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: 'rgba(20,20,24,0.85)',
+              borderRadius: 999,
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.10)',
+            }}
+          >
+            <Text
+              style={{
+                color: '#fff',
+                fontFamily: 'PlusJakartaSans_700Bold',
+                fontSize: 11,
+                letterSpacing: 1.4,
+              }}
+            >
+              ALIGN DOCUMENT WITHIN FRAME
+            </Text>
+          </View>
         </View>
-
-        <View style={[styles.overlaySide, { width: FRAME_PADDING }]} />
       </View>
 
-      {/* Dark overlay — bottom */}
+      {}
       <View
-        style={[
-          styles.overlay,
-          {
-            top: frameTop + FRAME_HEIGHT,
-            bottom: 0,
-          },
-        ]}
-      />
-
-      {/* Top controls */}
-      <View style={[styles.topControls, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          paddingHorizontal: 16,
+          paddingTop: insets.top + 8,
+          zIndex: 10,
+        }}
+      >
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+            backgroundColor: 'rgba(20,20,24,0.7)',
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.12)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          accessibilityLabel="Back"
+        >
+          <Ionicons name="chevron-back" size={20} color="#fff" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.iconButton} onPress={toggleFlash}>
+        <TouchableOpacity
+          onPress={toggleFlash}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+            backgroundColor: 'rgba(20,20,24,0.7)',
+            borderWidth: 1,
+            borderColor:
+              flashMode === 'on' ? Tokens.accent : 'rgba(255,255,255,0.12)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          accessibilityLabel="Toggle flash"
+        >
           <Ionicons
             name={flashMode === 'on' ? 'flash' : 'flash-off'}
-            size={22}
-            color="#fff"
+            size={18}
+            color={flashMode === 'on' ? Tokens.accent : '#fff'}
           />
         </TouchableOpacity>
       </View>
 
-      {/* Hint label */}
-      <View style={[styles.hintContainer, { top: frameTop + FRAME_HEIGHT - 56 }]}>
-        <View style={styles.hintPill}>
-          <Text style={styles.hintText}>ALIGN DOCUMENT WITHIN FRAME</Text>
+      {error ? (
+        <View
+          style={{
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            top: insets.top + 56,
+            backgroundColor: 'rgba(248,113,113,0.92)',
+            borderRadius: 10,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            zIndex: 10,
+          }}
+        >
+          <Text
+            style={{
+              color: Tokens.dangerInk,
+              fontFamily: 'PlusJakartaSans_600SemiBold',
+              fontSize: 12,
+            }}
+          >
+            {error}
+          </Text>
         </View>
-      </View>
+      ) : null}
 
-      {/* Bottom capture area */}
+      {}
       <View
-        style={[
-          styles.bottomControls,
-          { paddingBottom: insets.bottom + 16 },
-        ]}>
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          paddingTop: 24,
+          paddingBottom: insets.bottom + 20,
+          alignItems: 'center',
+          backgroundColor: Tokens.bg,
+          borderTopWidth: 1,
+          borderTopColor: Tokens.hairline,
+          zIndex: 10,
+        }}
+      >
         <TouchableOpacity
-          style={styles.captureButton}
           onPress={handleCapture}
-          activeOpacity={0.85}>
-          <View style={styles.captureInner} />
+          activeOpacity={0.85}
+          disabled={capturing}
+          style={{
+            width: 76,
+            height: 76,
+            borderRadius: 999,
+            borderWidth: 2,
+            borderColor: Tokens.ink,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: capturing ? 0.6 : 1,
+          }}
+          accessibilityLabel="Capture"
+        >
+          <View
+            style={{
+              width: capturing ? 52 : 56,
+              height: capturing ? 52 : 56,
+              borderRadius: 999,
+              backgroundColor: Tokens.accent,
+            }}
+          />
         </TouchableOpacity>
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  overlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.62)',
-  },
-  middleRow: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-  },
-  overlaySide: {
-    backgroundColor: 'rgba(0,0,0,0.62)',
-  },
-  // Corner brackets
-  corner: {
-    position: 'absolute',
-    width: CORNER_SIZE,
-    height: CORNER_SIZE,
-    borderColor: '#fff',
-  },
-  cornerTopLeft: {
-    top: 0,
-    left: 0,
-    borderTopWidth: CORNER_THICKNESS,
-    borderLeftWidth: CORNER_THICKNESS,
-  },
-  cornerTopRight: {
-    top: 0,
-    right: 0,
-    borderTopWidth: CORNER_THICKNESS,
-    borderRightWidth: CORNER_THICKNESS,
-  },
-  cornerBottomLeft: {
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: CORNER_THICKNESS,
-    borderLeftWidth: CORNER_THICKNESS,
-  },
-  cornerBottomRight: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: CORNER_THICKNESS,
-    borderRightWidth: CORNER_THICKNESS,
-  },
-  // Top controls
-  topControls: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    zIndex: 10,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // Hint
-  hintContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  hintPill: {
-    backgroundColor: 'rgba(30,30,30,0.82)',
-    borderRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  hintText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 1.2,
-  },
-  // Bottom
-  bottomControls: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#111',
-    alignItems: 'center',
-    paddingTop: 24,
-    zIndex: 10,
-  },
-  captureButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 3,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#1a5c46',
-  },
-  // Permission fallback
-  permissionContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    padding: 32,
-  },
-  permissionText: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  permissionButton: {
-    backgroundColor: '#1a5c46',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  permissionButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-});

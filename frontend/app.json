@@ -43,9 +43,10 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Izin kamera dibutuhkan untuk scan dokumen."
+          "cameraPermission": "Camera permission is required to scan documents."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,216 +1,281 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
+  ActivityIndicator,
   Image,
   ScrollView,
   StatusBar,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Button } from '@/components/button';
+import { Badge, Eyebrow } from '@/components/card';
+import { Tokens } from '@/constants/theme';
+import { getPreview } from '@/lib/api';
+import type { EnhanceMode } from '@/lib/types';
+
+const MODES: { key: EnhanceMode; label: string }[] = [
+  { key: 'color', label: 'Color' },
+  { key: 'gray', label: 'Gray' },
+  { key: 'bw', label: 'B&W' },
+  { key: 'magic', label: 'Magic' },
+];
 
 export default function ScanPreviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { uri } = useLocalSearchParams<{ uri: string }>();
 
-  const handleExtractText = () => {
+  const [mode, setMode] = useState<EnhanceMode>('color');
+  const [previewUri, setPreviewUri] = useState<string | undefined>(undefined);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!uri) return;
+    const myReqId = ++reqIdRef.current;
+    setPreviewLoading(true);
+    setPreviewError(null);
+
+    (async () => {
+      const res = await getPreview(uri, mode);
+      if (myReqId !== reqIdRef.current) return;
+      if (!res.ok) {
+        setPreviewError(res.error.message);
+        setPreviewUri(undefined);
+        setPreviewLoading(false);
+        return;
+      }
+      setPreviewUri(res.data.uri);
+      setPreviewLoading(false);
+    })();
+
+    return () => {
+      reqIdRef.current++;
+    };
+  }, [uri, mode]);
+
+  const handleExtractText = () => {
+    if (!uri) return;
     router.push({
       pathname: '/processing',
-      params: {
-        imageUri: uri,
-      },
+      params: { imageUri: uri, mode },
     });
-
-    console.log('Extract text pressed');
-  };
-
-  const handleRescan = () => {
-    router.back();
-  };
-
-  const handleSavePdf = () => {
-    // TODO: implement save PDF
-    console.log('Save PDF pressed');
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F5F0E8" />
+    <View style={{ flex: 1, backgroundColor: Tokens.bg, paddingTop: insets.top }}>
+      <StatusBar barStyle="light-content" backgroundColor={Tokens.bg} />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <Ionicons name="search" size={20} color="#1a1a1a" />
-        <Text style={styles.headerTitle}>ClassicScan</Text>
+      {}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 20,
+          paddingVertical: 14,
+        }}
+      >
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+            backgroundColor: Tokens.surface,
+            borderWidth: 1,
+            borderColor: Tokens.hairline,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          accessibilityLabel="Back"
+        >
+          <Ionicons name="chevron-back" size={20} color={Tokens.ink} />
+        </TouchableOpacity>
+        <View style={{ alignItems: 'center' }}>
+          <Eyebrow>Step 1 of 2</Eyebrow>
+          <Text
+            style={{
+              color: Tokens.ink,
+              fontFamily: 'PlusJakartaSans_700Bold',
+              fontSize: 16,
+              marginTop: 2,
+            }}
+          >
+            Preview
+          </Text>
+        </View>
+        <View style={{ width: 40 }} />
       </View>
 
-      {/* Scrollable content */}
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+      {}
+      <View style={{ paddingHorizontal: 20, marginBottom: 14 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {MODES.map((m) => {
+            const active = m.key === mode;
+            return (
+              <TouchableOpacity
+                key={m.key}
+                onPress={() => setMode(m.key)}
+                activeOpacity={0.85}
+                style={{
+                  flex: 1,
+                  height: 36,
+                  borderRadius: 999,
+                  backgroundColor: active ? Tokens.accent : Tokens.surface,
+                  borderWidth: 1,
+                  borderColor: active ? Tokens.accent : Tokens.hairline,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? Tokens.accentInk : Tokens.inkMuted,
+                    fontFamily: 'PlusJakartaSans_700Bold',
+                    fontSize: 11,
+                    letterSpacing: 0.8,
+                  }}
+                >
+                  {m.label.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
 
-        {/* Document preview card */}
-        <View style={styles.previewCard}>
-          {/* Enhanced badge */}
-          <View style={styles.enhancedBadge}>
-            <Text style={styles.enhancedText}>ENHANCED</Text>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: 20,
+          paddingBottom: 24,
+          flexGrow: 1,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View
+          style={{
+            backgroundColor: Tokens.surface,
+            borderRadius: 20,
+            borderWidth: 1,
+            borderColor: Tokens.hairline,
+            padding: 20,
+            minHeight: 480,
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+          }}
+        >
+          <View style={{ position: 'absolute', top: 14, right: 14, zIndex: 10 }}>
+            <Badge label={previewUri ? 'Enhanced' : 'Preview'} variant="accent" />
           </View>
 
-          {/* Document image */}
-          {uri ? (
+          {previewLoading ? (
+            <View style={{ alignItems: 'center', gap: 12 }}>
+              <ActivityIndicator size="large" color={Tokens.accent} />
+              <Text
+                style={{
+                  color: Tokens.inkMuted,
+                  fontFamily: 'PlusJakartaSans_500Medium',
+                  fontSize: 13,
+                  letterSpacing: 0.4,
+                }}
+              >
+                Enhancing
+              </Text>
+            </View>
+          ) : previewUri ? (
+            <Image
+              source={{ uri: previewUri }}
+              style={{ width: '85%', height: 380, borderRadius: 6 }}
+              resizeMode="contain"
+            />
+          ) : uri ? (
             <Image
               source={{ uri }}
-              style={styles.documentImage}
+              style={{ width: '85%', height: 380, borderRadius: 6 }}
               resizeMode="contain"
             />
           ) : (
-            <View style={styles.documentPlaceholder} />
+            <View
+              style={{
+                width: '85%',
+                height: 380,
+                backgroundColor: Tokens.surfaceRaised,
+                borderRadius: 6,
+              }}
+            />
           )}
+
+          {previewError ? (
+            <View
+              style={{
+                marginTop: 14,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 10,
+                backgroundColor: 'rgba(251,191,36,0.10)',
+                borderWidth: 1,
+                borderColor: 'rgba(251,191,36,0.32)',
+              }}
+            >
+              <Text
+                style={{
+                  color: Tokens.warning,
+                  fontFamily: 'PlusJakartaSans_500Medium',
+                  fontSize: 12,
+                }}
+              >
+                Preview failed: {previewError}. Showing raw photo.
+              </Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
 
-      {/* Bottom action sheet */}
-      <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 16 }]}>
-        {/* Action buttons row */}
-        <View style={styles.actionRow}>
-          {/* Extract Text */}
-          <TouchableOpacity style={styles.actionItem} onPress={handleExtractText} activeOpacity={0.7}>
-            <View style={styles.actionIconCircle}>
-              <Ionicons name="text" size={22} color="#555" />
-            </View>
-            <Text style={styles.actionLabel}>Extract Text (Using OCR)</Text>
-          </TouchableOpacity>
-
-          {/* Rescan */}
-          <TouchableOpacity style={styles.actionItem} onPress={handleRescan} activeOpacity={0.7}>
-            <View style={styles.actionIconCircle}>
-              <Ionicons name="refresh" size={22} color="#555" />
-            </View>
-            <Text style={styles.actionLabel}>Rescan</Text>
-          </TouchableOpacity>
+      {}
+      <View
+        style={{
+          backgroundColor: Tokens.surface,
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
+          borderTopWidth: 1,
+          borderColor: Tokens.hairline,
+          paddingTop: 20,
+          paddingHorizontal: 20,
+          paddingBottom: insets.bottom + 16,
+          gap: 14,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 24,
+          elevation: 12,
+        }}
+      >
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <Button
+            label="Rescan"
+            variant="secondary"
+            onPress={() => router.back()}
+            style={{ flex: 1 }}
+            leading={<Ionicons name="refresh" size={18} color={Tokens.ink} />}
+          />
+          <Button
+            label="Extract & save"
+            variant="primary"
+            onPress={handleExtractText}
+            style={{ flex: 1.4 }}
+            trailing={<Ionicons name="arrow-forward" size={18} color={Tokens.accentInk} />}
+          />
         </View>
-
-        {/* Save PDF button */}
-        <TouchableOpacity style={styles.savePdfButton} onPress={handleSavePdf} activeOpacity={0.85}>
-          <Ionicons name="save-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={styles.savePdfText}>SAVE PDF DOCUMENT</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F0E8',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    letterSpacing: 0.2,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    flexGrow: 1,
-  },
-  previewCard: {
-    backgroundColor: '#E8E4DC',
-    borderRadius: 20,
-    padding: 20,
-    minHeight: 480,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  enhancedBadge: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    backgroundColor: '#2d6e52',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    zIndex: 1,
-  },
-  enhancedText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  documentImage: {
-    width: '80%',
-    height: 380,
-    borderRadius: 4,
-  },
-  documentPlaceholder: {
-    width: '80%',
-    height: 380,
-    backgroundColor: '#d0ccc4',
-    borderRadius: 4,
-  },
-  bottomSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingTop: 28,
-    paddingHorizontal: 24,
-    gap: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 40,
-  },
-  actionItem: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionLabel: {
-    fontSize: 12,
-    color: '#444',
-    textAlign: 'center',
-    maxWidth: 100,
-  },
-  savePdfButton: {
-    backgroundColor: '#1a4a35',
-    borderRadius: 14,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  savePdfText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-});

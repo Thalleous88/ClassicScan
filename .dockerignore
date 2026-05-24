@@ -1,0 +1,20 @@
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/node_modules/
+**/.expo/
+**/.git/
+**/.env
+**/*.log
+
+# Backend dev artefacts
+backend/ml/debug/
+backend/ml/test*.jpg
+backend/ml/test*.jpeg
+backend/ml/scanner_out.jpg
+backend/ml/eval/
+backend/storage/
+
+# Frontend build artefacts
+frontend/dist/
+frontend/.expo/

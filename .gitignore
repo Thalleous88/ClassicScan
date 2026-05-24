@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -244,6 +243,14 @@ Pods/
 .DS_Store
 Thumbs.db
 
+# OCR debug dumps
+backend/ml/debug/
+backend/ml/scanner_out.jpg
+
+# Per-user scan storage (raw / enhanced / pdf bytes)
+backend/storage/
+
 # IDEs
 .vscode/
 .idea/
+
