@@ -1,0 +1,6 @@
+# Eval manifest: printed documents
+# One filename per line, relative to backend/ml/
+# Drop ground truth as <filename>.<ext>.gt.txt next to each image.
+test.jpg
+test2.jpg
+test3.jpg

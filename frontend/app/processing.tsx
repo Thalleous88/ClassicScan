@@ -1,195 +1,212 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  View,
   Image,
-  ActivityIndicator,
-  TouchableOpacity,
+  Text,
+  View,
 } from 'react-native';
 
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { Button } from '@/components/button';
+import { Eyebrow } from '@/components/card';
+import { Tokens } from '@/constants/theme';
+import { createScan } from '@/lib/store';
+import type { EnhanceMode } from '@/lib/types';
 
 export default function ProcessingScreen() {
-
-  const { imageUri } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
+  const { imageUri, mode } = useLocalSearchParams<{ imageUri: string; mode?: string }>();
+  const enhanceMode: EnhanceMode = (mode as EnhanceMode) ?? 'color';
 
   const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const ctrlRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    if (!imageUri) return;
+    setError(null);
+    setDone(false);
+    setProgress(0);
+    const ctrl = new AbortController();
+    ctrlRef.current = ctrl;
 
-    const interval = setInterval(() => {
+    let raf: number | null = null;
+    let mounted = true;
+    const start = Date.now();
+    const expectedMs = 12_000;
 
-      setProgress((prev) => {
+    const tick = () => {
+      if (!mounted) return;
+      const elapsed = Date.now() - start;
+      const t = Math.min(1, elapsed / expectedMs);
+      const eased = 1 - Math.pow(1 - t, 2.2);
+      const target = Math.min(92, Math.round(eased * 92));
+      setProgress((p) => (target > p ? target : p));
+      raf = requestAnimationFrame(tick) as unknown as number;
+    };
+    raf = requestAnimationFrame(tick) as unknown as number;
 
-        if (prev >= 100) {
-
-          clearInterval(interval);
-
-          router.push('/ocr-result');
-
-          return 100;
-        }
-
-        return prev + 5;
+    (async () => {
+      const res = await createScan(imageUri, {
+        mode: 'auto',
+        enhanceMode,
+        signal: ctrl.signal,
       });
+      if (!mounted || ctrl.signal.aborted) return;
+      if (raf != null) cancelAnimationFrame(raf);
 
-    }, 300);
+      if (!res.ok) {
+        setError(res.error.message);
+        return;
+      }
 
-    return () => clearInterval(interval);
+      setProgress(100);
+      setDone(true);
+      setTimeout(() => {
+        if (!mounted || ctrl.signal.aborted) return;
+        router.replace({ pathname: '/ocr-result', params: { scanId: res.data.id } });
+      }, 220);
+    })();
 
-  }, []);
+    return () => {
+      mounted = false;
+      if (raf != null) cancelAnimationFrame(raf);
+      ctrl.abort();
+    };
+  }, [imageUri, enhanceMode]);
+
+  const cancel = () => {
+    ctrlRef.current?.abort();
+    router.back();
+  };
+
+  const retry = () => {
+    setError(null);
+    setProgress(0);
+    router.replace({ pathname: '/processing', params: { imageUri, mode: enhanceMode } });
+  };
+
+  const phase = error ? 'ERROR' : done ? 'COMPLETE' : 'PROCESSING';
+  const title = error ? 'Extraction failed' : done ? 'Done' : 'Extracting text';
 
   return (
-
-    <ThemedView style={styles.container}>
-
-      {/* IMAGE PREVIEW */}
-      <Image
-        source={{ uri: imageUri as string }}
-        style={styles.previewImage}
-      />
-
-      {/* LOADING */}
-      <ActivityIndicator
-        size="large"
-        color="#0F5C4D"
-        style={styles.loader}
-      />
-
-      {/* TEXT */}
-      <ThemedText style={styles.title}>
-        Extracting text...
-      </ThemedText>
-
-      <ThemedText style={styles.subtitle}>
-        OCR engine is identifying characters
-        and converting them into searchable
-        data.
-      </ThemedText>
-
-      {/* PROGRESS */}
-      <View style={styles.progressContainer}>
-
-        <View
-          style={[
-            styles.progressBar,
-            { width: `${progress}%` }
-          ]}
-        />
-
-      </View>
-
-      <View style={styles.progressTextContainer}>
-
-        <ThemedText style={styles.processingText}>
-          PROCESSING
-        </ThemedText>
-
-        <ThemedText style={styles.percentText}>
-          {progress}%
-        </ThemedText>
-
-      </View>
-
-      {/* CANCEL BUTTON */}
-      <TouchableOpacity
-        style={styles.cancelButton}
-        onPress={() => router.back()}
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: Tokens.bg,
+        paddingTop: insets.top + 24,
+        paddingBottom: insets.bottom + 24,
+        paddingHorizontal: 20,
+      }}
+    >
+      <View
+        style={{
+          width: '100%',
+          height: 380,
+          borderRadius: 20,
+          borderWidth: 1,
+          borderColor: Tokens.hairline,
+          backgroundColor: Tokens.surface,
+          overflow: 'hidden',
+        }}
       >
+        {imageUri ? (
+          <Image
+            source={{ uri: imageUri }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+          />
+        ) : null}
+      </View>
 
-        <ThemedText style={styles.cancelText}>
-          Cancel Process
-        </ThemedText>
+      <View style={{ marginTop: 28, alignItems: 'flex-start' }}>
+        <Eyebrow tone={error ? 'muted' : 'accent'}>{phase}</Eyebrow>
+        <Text
+          style={{
+            color: Tokens.ink,
+            fontFamily: 'PlusJakartaSans_700Bold',
+            fontSize: 28,
+            lineHeight: 32,
+            letterSpacing: -0.4,
+            marginTop: 8,
+          }}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            color: Tokens.inkMuted,
+            fontFamily: 'PlusJakartaSans_400Regular',
+            fontSize: 14,
+            lineHeight: 22,
+            marginTop: 6,
+          }}
+        >
+          {error
+            ? error
+            : 'Identifying characters and converting them into searchable data.'}
+        </Text>
+      </View>
 
-      </TouchableOpacity>
+      {}
+      <View style={{ marginTop: 24 }}>
+        <View
+          style={{
+            height: 2,
+            borderRadius: 999,
+            backgroundColor: Tokens.hairline,
+            overflow: 'hidden',
+          }}
+        >
+          <View
+            style={{
+              height: '100%',
+              backgroundColor: error ? Tokens.danger : Tokens.accent,
+              width: `${progress}%`,
+            }}
+          />
+        </View>
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            marginTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              color: Tokens.inkFaint,
+              fontFamily: 'PlusJakartaSans_700Bold',
+              fontSize: 11,
+              letterSpacing: 1.4,
+            }}
+          >
+            {phase}
+          </Text>
+          <Text
+            style={{
+              color: error ? Tokens.danger : Tokens.accent,
+              fontFamily: 'PlusJakartaSans_700Bold',
+              fontSize: 12,
+            }}
+          >
+            {progress}%
+          </Text>
+        </View>
+      </View>
 
-    </ThemedView>
+      <View style={{ flex: 1 }} />
+
+      {error ? (
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <Button label="Cancel" variant="secondary" onPress={cancel} style={{ flex: 1 }} />
+          <Button label="Retry" variant="primary" onPress={retry} style={{ flex: 1 }} />
+        </View>
+      ) : (
+        <Button label="Cancel" variant="secondary" onPress={cancel} />
+      )}
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-
-  container: {
-    flex: 1,
-    backgroundColor: '#F4F4F4',
-    paddingHorizontal: 20,
-    paddingTop: 40,
-    alignItems: 'center',
-  },
-
-  previewImage: {
-    width: '100%',
-    height: 420,
-    borderRadius: 12,
-    resizeMode: 'cover',
-  },
-
-  loader: {
-    marginTop: 20,
-  },
-
-  title: {
-    marginTop: 20,
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#0F5C4D',
-  },
-
-  subtitle: {
-    marginTop: 10,
-    textAlign: 'center',
-    color: '#666',
-    lineHeight: 22,
-    paddingHorizontal: 20,
-  },
-
-  progressContainer: {
-    width: '100%',
-    height: 6,
-    backgroundColor: '#D9D9D9',
-    borderRadius: 10,
-    marginTop: 40,
-    overflow: 'hidden',
-  },
-
-  progressBar: {
-    height: '100%',
-    backgroundColor: '#0F5C4D',
-  },
-
-  progressTextContainer: {
-    width: '100%',
-    marginTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-
-  processingText: {
-    fontSize: 12,
-    color: '#777',
-    letterSpacing: 1,
-  },
-
-  percentText: {
-    fontWeight: '700',
-    color: '#0F5C4D',
-  },
-
-  cancelButton: {
-    marginTop: 40,
-    borderWidth: 1,
-    borderColor: '#D9D9D9',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-    backgroundColor: '#FFF',
-  },
-
-  cancelText: {
-    color: '#666',
-  },
-
-});
