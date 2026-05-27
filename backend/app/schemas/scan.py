@@ -8,11 +8,13 @@ from pydantic import BaseModel, ConfigDict
 PipelineMode = Literal["auto", "printed", "handwriting"]
 EnhanceMode = Literal["original", "color", "gray", "bw", "magic"]
 PipelinePath = Literal["printed", "handwriting"]
+OcrEngine = Literal["pytesseract", "from_scratch"]
 
 class ScanAssets(BaseModel):
     raw: Optional[str] = None
     enhanced: Optional[str] = None
     pdf: Optional[str] = None
+    docx: Optional[str] = None
 
 class ScanListItem(BaseModel):
     id: str
@@ -21,10 +23,12 @@ class ScanListItem(BaseModel):
     bytes_size: int
     pipeline_path: PipelinePath
     enhance_mode: EnhanceMode
+    ocr_engine: OcrEngine = "pytesseract"
     handwriting_detected: bool
     mean_conf: float
     has_pdf: bool
     has_enhanced: bool
+    has_docx: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -38,6 +42,7 @@ class ScanOut(BaseModel):
     mode: str
     enhance_mode: EnhanceMode
     pipeline_path: PipelinePath
+    ocr_engine: OcrEngine = "pytesseract"
     language: str
 
     mean_conf: float

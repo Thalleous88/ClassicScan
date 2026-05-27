@@ -20,6 +20,7 @@ import { Eyebrow } from '@/components/card';
 import { Tokens } from '@/constants/theme';
 import { downloadAsset } from '@/lib/api';
 import {
+  attachDocx,
   attachPdf,
   fetchAssetToCache,
   getCachedScan,
@@ -27,7 +28,7 @@ import {
   reprocessScan,
   useScanStore,
 } from '@/lib/store';
-import type { PipelinePath, ScanRecord } from '@/lib/types';
+import type { OcrEngine, PipelinePath, ScanRecord } from '@/lib/types';
 
 export default function OCRResultScreen() {
   const insets = useSafeAreaInsets();
@@ -37,8 +38,10 @@ export default function OCRResultScreen() {
 
   const [loading, setLoading] = useState(false);
   const [savingPdf, setSavingPdf] = useState(false);
+  const [savingDocx, setSavingDocx] = useState(false);
   const [savingText, setSavingText] = useState(false);
   const [reprocessing, setReprocessing] = useState<PipelinePath | null>(null);
+  const [switchingEngine, setSwitchingEngine] = useState<OcrEngine | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -176,6 +179,7 @@ export default function OCRResultScreen() {
     setReprocessing(target);
     const res = await reprocessScan(scan.id, target, {
       enhanceMode: scan.enhance_mode,
+      ocrEngine: scan.ocr_engine,
     });
     setReprocessing(null);
     if (!res.ok) {
@@ -191,6 +195,77 @@ export default function OCRResultScreen() {
     if (kind) {
       const r = await fetchAssetToCache(res.data.id, kind);
       if (r.ok) setImageUri(r.data.uri);
+    }
+  };
+
+  const handleSwitchEngine = async (target: OcrEngine) => {
+    if (!scan || switchingEngine) return;
+    if (target === scan.ocr_engine) return;
+    setError(null);
+    setSwitchingEngine(target);
+    const res = await reprocessScan(
+      scan.id,
+      scan.pipeline_path === 'handwriting' ? 'handwriting' : 'printed',
+      {
+        enhanceMode: scan.enhance_mode,
+        ocrEngine: target,
+      },
+    );
+    setSwitchingEngine(null);
+    if (!res.ok) {
+      setError(res.error.message);
+    }
+  };
+
+  const handleSaveDocx = async () => {
+    if (!scan || savingDocx) return;
+    setError(null);
+
+    if (scan.assets.docx) {
+      setSavingDocx(true);
+      const r = await downloadAsset(scan.id, 'docx', `${scan.name}.docx`);
+      setSavingDocx(false);
+      if (!r.ok) {
+        setError(r.error.message);
+        return;
+      }
+      if (await Sharing.isAvailableAsync()) {
+        try {
+          await Sharing.shareAsync(r.data.uri, {
+            mimeType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            dialogTitle: 'Save as DOCX',
+          });
+        } catch {
+          /* user cancelled share sheet */
+        }
+      }
+      return;
+    }
+
+    setSavingDocx(true);
+    const res = await attachDocx(scan.id, { includeImage: true });
+    if (!res.ok) {
+      setError(res.error.message);
+      setSavingDocx(false);
+      return;
+    }
+    const dl = await downloadAsset(scan.id, 'docx', `${scan.name}.docx`);
+    setSavingDocx(false);
+    if (!dl.ok) {
+      setError(dl.error.message);
+      return;
+    }
+    if (await Sharing.isAvailableAsync()) {
+      try {
+        await Sharing.shareAsync(dl.data.uri, {
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          dialogTitle: 'Save as DOCX',
+        });
+      } catch {
+        /* user cancelled share sheet */
+      }
     }
   };
 
@@ -439,6 +514,63 @@ export default function OCRResultScreen() {
         <View
           style={{
             backgroundColor: Tokens.surface,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: Tokens.hairline,
+            paddingVertical: 12,
+            paddingHorizontal: 14,
+            marginBottom: 14,
+          }}
+        >
+          <Eyebrow>OCR engine</Eyebrow>
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+            {(['from_scratch', 'pytesseract'] as OcrEngine[]).map((e) => {
+              const active = scan.ocr_engine === e;
+              const busy = switchingEngine === e;
+              const label = e === 'from_scratch' ? 'From Scratch' : 'PyTesseract';
+              return (
+                <TouchableOpacity
+                  key={e}
+                  onPress={() => handleSwitchEngine(e)}
+                  disabled={active || !!switchingEngine}
+                  activeOpacity={0.85}
+                  style={{
+                    flex: 1,
+                    height: 28,
+                    borderRadius: 999,
+                    backgroundColor: active ? Tokens.accent : 'transparent',
+                    borderWidth: 1,
+                    borderColor: active ? Tokens.accent : Tokens.hairline,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: !active && switchingEngine && !busy ? 0.4 : 1,
+                  }}
+                >
+                  {busy ? (
+                    <ActivityIndicator size="small" color={Tokens.ink} />
+                  ) : (
+                    <Text
+                      style={{
+                        color: active ? Tokens.accentInk : Tokens.inkMuted,
+                        fontFamily: 'PlusJakartaSans_700Bold',
+                        fontSize: 10,
+                        letterSpacing: 0.8,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {label}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {}
+        <View
+          style={{
+            backgroundColor: Tokens.surface,
             borderRadius: 14,
             borderWidth: 1,
             borderColor: Tokens.hairline,
@@ -511,21 +643,40 @@ export default function OCRResultScreen() {
             />
           </View>
 
-          <Button
-            label={scan.assets.pdf ? 'Open PDF' : 'Save as PDF'}
-            variant="primary"
-            loading={savingPdf}
-            onPress={handleSavePdf}
-            leading={
-              !savingPdf ? (
-                <Ionicons
-                  name={scan.assets.pdf ? 'open-outline' : 'download-outline'}
-                  size={18}
-                  color={Tokens.accentInk}
-                />
-              ) : null
-            }
-          />
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Button
+              label={scan.assets.pdf ? 'Open PDF' : 'Save as PDF'}
+              variant="primary"
+              loading={savingPdf}
+              onPress={handleSavePdf}
+              style={{ flex: 1 }}
+              leading={
+                !savingPdf ? (
+                  <Ionicons
+                    name={scan.assets.pdf ? 'open-outline' : 'download-outline'}
+                    size={18}
+                    color={Tokens.accentInk}
+                  />
+                ) : null
+              }
+            />
+            <Button
+              label={scan.assets.docx ? 'Open DOCX' : 'Save as DOCX'}
+              variant="secondary"
+              loading={savingDocx}
+              onPress={handleSaveDocx}
+              style={{ flex: 1 }}
+              leading={
+                !savingDocx ? (
+                  <Ionicons
+                    name={scan.assets.docx ? 'open-outline' : 'document-text-outline'}
+                    size={18}
+                    color={Tokens.ink}
+                  />
+                ) : null
+              }
+            />
+          </View>
         </View>
       </ScrollView>
     </View>

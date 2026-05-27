@@ -67,8 +67,9 @@ frontend/
       index.tsx      redirect helper
       home.tsx       scan entry + recents
       history.tsx    full scan history with search
-    camera-scan.tsx  live camera with framing bracket
-    scan-preview.tsx live enhancement preview, mode picker
+    camera-scan.tsx  camera with static A4 framing bracket
+    adjust-corners.tsx manual quad confirmation (every scan goes through this)
+    scan-preview.tsx live enhancement preview, mode + engine picker
     processing.tsx   blocking progress while /scan/extract runs
     ocr-result.tsx   final scan view: text, image, share/save
   components/        shared UI primitives (Button, Card, Eyebrow, etc.)
@@ -90,27 +91,39 @@ frontend/
 2. **Tap SCAN** on the home tab → `camera-scan.tsx`.
    The screen renders a 3:4 portrait camera region with a centered A4-shaped
    bracket purely as a framing guide. On shutter the full sensor JPEG is
-   passed straight through — no client-side cropping.
+   passed straight through — no client-side cropping, no live edge overlay.
 
-3. **Scan preview** (`scan-preview.tsx`).
-   The screen calls `POST /scan/preview` with the image and the current
-   `enhance_mode`. The backend runs the full ML pipeline (auto-detect quad,
-   warp, classify, enhance) but **skips OCR**, returning just the enhanced
-   image bytes. The user can switch between Color / Gray / B&W / Magic modes;
-   each switch re-fetches the preview. There is no manual corner-adjustment
-   step — auto-detection is the source of truth.
+3. **Adjust corners** (`adjust-corners.tsx`).
+   Every scan goes through manual corner confirmation before extraction.
+   On mount the screen calls `POST /scan/detect` to seed the four handles
+   from auto-detection (or a centred 80% rectangle if detection fails),
+   the user drags any corners that need correcting, and tapping
+   **Continue** forwards the resulting quad as a `quad_override` route
+   param. There is no auto bypass — the user always confirms the four
+   corners.
 
-4. **Tap "Extract & save"** → `processing.tsx`.
-   Same image is uploaded once more, this time to `POST /scan/extract`. The
-   backend re-runs the pipeline with OCR enabled, persists the raw + enhanced
-   assets to disk, persists the row in `scans`, and returns the full
-   `ScanRecord` (text, words, confidence, asset URLs). The frontend store
-   (`lib/store.ts`) inserts the new record into its in-memory cache so the
-   list views update instantly.
+4. **Scan preview** (`scan-preview.tsx`).
+   The screen calls `POST /scan/preview` with the image, the current
+   `enhance_mode`, and the `quad_override` from step 3. The backend
+   skips its own detector and warps using the user-supplied corners,
+   then runs the rest of the ML pipeline (resize, classify, enhance)
+   but **skips OCR**, returning just the enhanced image bytes. The user
+   picks one of Color / Gray / B&W / Magic, then picks an OCR engine
+   (From Scratch or PyTesseract) for the next step.
 
-5. **OCR result** (`ocr-result.tsx`).
-   Shows the enhanced image, OCR text, confidence, and pipeline metadata.
-   Buttons:
+5. **Tap "Extract & save"** → `processing.tsx`.
+   Same image is uploaded once more, this time to `POST /scan/extract`,
+   along with `quad_override`, `enhance_mode`, and `ocr_engine`. The
+   backend reuses the supplied corners, runs the pipeline with OCR
+   enabled, persists the raw + enhanced assets to disk, persists the
+   row in `scans`, and returns the full `ScanRecord` (text, words,
+   confidence, asset URLs, engine used). The frontend store
+   (`lib/store.ts`) inserts the new record into its in-memory cache so
+   the list views update instantly.
+
+6. **OCR result** (`ocr-result.tsx`).
+   Shows the enhanced image, OCR text, confidence, pipeline path, and
+   engine used. Buttons:
    - **Copy** — `expo-clipboard`.
    - **Share text** — writes a `.txt` to the cache and opens the OS share
      sheet via `expo-sharing`.
@@ -119,22 +132,28 @@ frontend/
      is high enough), then downloads + shares it. Subsequent taps skip
      generation.
    - **Reprocess** — `POST /scan/{id}/reprocess` with a different pipeline
-     mode (auto / printed / handwriting); rewrites text + enhanced asset.
+     mode (auto / printed / handwriting) or a different OCR engine; rewrites
+     text + enhanced asset.
 
-6. **History** (`(tabs)/history.tsx`).
+7. **History** (`(tabs)/history.tsx`).
    `GET /scan/history` returns a paginated list. Tapping a row navigates back
    to `ocr-result.tsx` for the selected scan.
 
 ## Backend ML pipeline
 
 `ml/pipeline.run_from_array(image_bgr, ...)` is the single entrypoint. Both
-`/scan/preview` and `/scan/extract` call into it. Stages:
+`/scan/preview` and `/scan/extract` call into it. Bytes are decoded once by
+`pipeline._decode` using Pillow's `ImageOps.exif_transpose`, which honours
+the EXIF orientation tag phones add to portrait captures. Every later
+stage sees a single canonical pixel grid that matches what the device
+shows on screen. Stages:
 
 1. **Document detection** — `detector.detect_document(image_bgr)`.
    Builds an edge map (Canny + Hough), finds quad candidates from contours
    and from line-pair intersections, scores each on edge strength, area,
    centrality, interior text density, and right-angle quality, picks the
-   best.
+   best. Skipped when the request supplies a `quad_override` from
+   `adjust-corners.tsx`; the user-confirmed corners are used directly.
 2. **Perspective warp** — `detector.warp_to_document`.
    `_order_quad` canonicalises corners as TL→TR→BR→BL via sum/diff heuristic,
    then `cv2.getPerspectiveTransform` + `cv2.warpPerspective` rectifies the
@@ -229,11 +248,11 @@ Two tables, both created automatically at startup via
 `scans`
 - `id` UUID PK, `user_id` FK → `users.user_id` (cascade), `created_at`.
 - `name`, `original_filename`, `bytes_size`.
-- `mode`, `enhance_mode`, `pipeline_path`, `language`.
+- `mode`, `enhance_mode`, `pipeline_path`, `ocr_engine`, `language`.
 - `mean_conf`, `psm_used`, `document_detected`, `detection_score`,
   `handwriting_detected`, `handwriting_confidence`, `confidence_warning`.
 - `text` (full OCR output).
-- `raw_path`, `enhanced_path`, `enhanced_mime`, `pdf_path`.
+- `raw_path`, `enhanced_path`, `enhanced_mime`, `pdf_path`, `docx_path`.
 
 There are no migrations; alembic is listed in `requirements.txt` but
 unused. Schema changes require either dropping the dev DB or running
@@ -333,7 +352,7 @@ Smoke checks:
 cd frontend
 npm install
 copy .env.example .env
-# point EXPO_PUBLIC_API_URL at your backend
+
 npm start
 ```
 
@@ -395,6 +414,11 @@ meta.json               detection scores, classifier signals, OCR alts
   `02_quad_overlay.jpg`. Common causes: low-contrast page edges, hand or
   finger occluding a corner, page filling the entire frame so detection
   finds the camera frame instead of the document.
+- **Manual crop lands in the wrong place** — was caused by EXIF
+  orientation mismatch between iOS captures and `cv2.imdecode`. All
+  decodes now go through `pipeline._decode` (Pillow + `exif_transpose`).
+  If the symptom returns, set `OCR_DEBUG=1` and verify `00_input.jpg`
+  matches the orientation the user saw on the camera screen.
 - **OCR text looks rotated** — auto-orient runs Tesseract OSD; very short
   documents may not have enough text for OSD to lock on. Try the
   handwriting mode (skips orient) or capture a sharper photo.

@@ -41,6 +41,7 @@ class Scan(Base):
     mode = Column(String(32), nullable=False, default="auto")
     enhance_mode = Column(String(32), nullable=False, default="color")
     pipeline_path = Column(String(32), nullable=False, default="printed")
+    ocr_engine = Column(String(32), nullable=False, default="pytesseract")
 
     mean_conf = Column(Float, nullable=False, default=0.0)
     document_detected = Column(Boolean, nullable=False, default=False)
@@ -57,5 +58,6 @@ class Scan(Base):
     enhanced_path = Column(String(1024), nullable=True)
     enhanced_mime = Column(String(64), nullable=True)
     pdf_path = Column(String(1024), nullable=True)
+    docx_path = Column(String(1024), nullable=True)
 
     user = relationship("User", backref="scans")

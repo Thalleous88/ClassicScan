@@ -11,11 +11,13 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-from . import classify, detector, enhancer, ocr, scanner_enhance
+from . import classify, detector, enhancer, ocr, ocr_from_scratch, scanner_enhance
 
 DEBUG_DIR = Path(__file__).resolve().parent / "debug"
 
 PIPELINE_MAX_EDGE = 2200
+
+OCR_ENGINES = ("pytesseract", "from_scratch")
 
 @dataclass
 class WordOut:
@@ -58,6 +60,7 @@ class PipelineResult:
     text_alternatives: list[AlternativeOut] = field(default_factory=list)
     enhance_mode_used: str = "color"
     enhanced_mime: str = "image/jpeg"
+    ocr_engine_used: str = "pytesseract"
     crop_jpg: Optional[bytes] = None
     enhanced_bytes: Optional[bytes] = None
 
@@ -77,11 +80,28 @@ class PipelineResult:
         return d
 
 def _decode(image_bytes: bytes) -> np.ndarray:
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("could not decode image")
-    return img
+    """Decode JPEG/PNG bytes into a BGR numpy array, honouring EXIF orientation.
+
+    Phone captures (especially from iOS) carry an EXIF orientation tag that
+    `cv2.imdecode` ignores. If we trusted cv2's raw pixel grid, the image
+    the user sees on screen and the image the pipeline processes would have
+    different dimensions and orientations, so any quad coordinates the user
+    supplied would land in the wrong place. Pillow's `exif_transpose`
+    physically rotates the pixels and strips the orientation tag, giving us
+    one canonical pixel grid that matches what the device renders.
+    """
+    from io import BytesIO
+
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as im:
+            im = ImageOps.exif_transpose(im)
+            im = im.convert("RGB")
+            arr = np.array(im)
+    except Exception as e:
+        raise ValueError("could not decode image") from e
+    return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
 
 def _debug_enabled() -> bool:
     return os.getenv("OCR_DEBUG", "").strip() in ("1", "true", "True", "yes")
@@ -149,6 +169,8 @@ def run_from_bytes(
     enhance_quality: int = 88,
     return_enhanced: bool = False,
     skip_ocr: bool = False,
+    ocr_engine: str = "pytesseract",
+    quad_override: Optional[np.ndarray] = None,
 ) -> PipelineResult:
     image = _decode(image_bytes)
     return run_from_array(
@@ -161,6 +183,8 @@ def run_from_bytes(
         enhance_quality=enhance_quality,
         return_enhanced=return_enhanced,
         skip_ocr=skip_ocr,
+        ocr_engine=ocr_engine,
+        quad_override=quad_override,
     )
 
 def run_from_path(path: str, **kwargs) -> PipelineResult:
@@ -179,24 +203,49 @@ def run_from_array(
     enhance_quality: int = 88,
     return_enhanced: bool = False,
     skip_ocr: bool = False,
+    ocr_engine: str = "pytesseract",
+    quad_override: Optional[np.ndarray] = None,
 ) -> PipelineResult:
+    if ocr_engine not in OCR_ENGINES:
+        ocr_engine = "pytesseract"
     sess = _new_debug_session()
-    meta: dict = {"mode_requested": mode, "lang": lang, "enhance_mode": enhance_mode}
+    meta: dict = {
+        "mode_requested": mode,
+        "lang": lang,
+        "enhance_mode": enhance_mode,
+        "ocr_engine": ocr_engine,
+        "quad_override": quad_override is not None,
+    }
     _dump(sess, "00_input.jpg", image_bgr)
 
-    det = detector.detect_document(image_bgr)
-    meta["detection"] = {
-        "document_detected": det.document_detected,
-        "score": det.score,
-        "debug": det.debug,
-    }
-    if det.document_detected and det.quad is not None:
-        warped = detector.warp_to_document(image_bgr, det.quad)
+    if quad_override is not None and quad_override.shape == (4, 2):
+        warped = detector.warp_to_document(image_bgr, quad_override.astype(np.float32))
+        det_detected = True
+        det_score = 1.0
+        meta["detection"] = {
+            "document_detected": True,
+            "score": 1.0,
+            "source": "quad_override",
+        }
         overlay = image_bgr.copy()
-        cv2.polylines(overlay, [det.quad.astype(np.int32)], True, (0, 255, 0), 3)
+        cv2.polylines(overlay, [quad_override.astype(np.int32)], True, (0, 200, 255), 3)
         _dump(sess, "02_quad_overlay.jpg", overlay)
     else:
-        warped = image_bgr.copy()
+        det = detector.detect_document(image_bgr)
+        meta["detection"] = {
+            "document_detected": det.document_detected,
+            "score": det.score,
+            "debug": det.debug,
+        }
+        det_detected = det.document_detected
+        det_score = det.score
+        if det.document_detected and det.quad is not None:
+            warped = detector.warp_to_document(image_bgr, det.quad)
+            overlay = image_bgr.copy()
+            cv2.polylines(overlay, [det.quad.astype(np.int32)], True, (0, 255, 0), 3)
+            _dump(sess, "02_quad_overlay.jpg", overlay)
+        else:
+            warped = image_bgr.copy()
 
     h_w, w_w = warped.shape[:2]
     longest = max(h_w, w_w)
@@ -262,8 +311,8 @@ def run_from_array(
             text="",
             mean_conf=0.0,
             language=lang if not is_hw else "eng",
-            document_detected=det.document_detected,
-            detection_score=det.score,
+            document_detected=det_detected,
+            detection_score=det_score,
             psm_used=0,
             pipeline_path="handwriting" if is_hw else "printed",
             handwriting_detected=is_hw,
@@ -273,9 +322,12 @@ def run_from_array(
             text_alternatives=[],
             enhance_mode_used=enhance_mode_used,
             enhanced_mime=enhanced_mime,
+            ocr_engine_used=ocr_engine,
             crop_jpg=crop_jpg,
             enhanced_bytes=enhanced_bytes,
         )
+
+    engine_used = ocr_engine
 
     if is_hw:
         hw_gray = enhancer.handwriting_path(warped)
@@ -287,12 +339,18 @@ def run_from_array(
             is_hw = picked == "handwriting"
             path_label = picked
             meta["borderline_both_branch"] = picked
+            if ocr_engine == "from_scratch":
+                engine_used = "pytesseract"
+                meta["from_scratch_fallback"] = "handwriting"
         else:
             best, alts = ocr.run_handwriting(
                 {"handwriting_gray": hw_gray, "raw": raw_full},
                 spell_check=False,
             )
             path_label = "handwriting"
+            if ocr_engine == "from_scratch":
+                engine_used = "pytesseract"
+                meta["from_scratch_fallback"] = "handwriting"
     else:
         gray_path = enhancer.grayscale_path(warped)
         _dump(sess, "07_gray_path.jpg", gray_path)
@@ -309,12 +367,26 @@ def run_from_array(
             is_hw = picked == "handwriting"
             path_label = picked
             meta["borderline_both_branch"] = picked
+            if ocr_engine == "from_scratch":
+                engine_used = "pytesseract"
+                meta["from_scratch_fallback"] = "borderline"
         else:
-            best, alts = ocr.run_printed(
-                {"gray": gray_path, "binary": bin_path, "raw": raw_full},
-                lang=lang,
-                spell_check=spell_check,
-            )
+            printed_imgs = {"gray": gray_path, "binary": bin_path, "raw": raw_full}
+            if ocr_engine == "from_scratch":
+                if ocr_from_scratch.has_model():
+                    best, alts = ocr_from_scratch.run_printed(
+                        printed_imgs, lang=lang, spell_check=spell_check
+                    )
+                else:
+                    best, alts = ocr.run_printed(
+                        printed_imgs, lang=lang, spell_check=spell_check
+                    )
+                    engine_used = "pytesseract"
+                    meta["from_scratch_fallback"] = "model_missing"
+            else:
+                best, alts = ocr.run_printed(
+                    printed_imgs, lang=lang, spell_check=spell_check
+                )
             path_label = "printed"
 
     warning: Optional[str] = None
@@ -322,6 +394,10 @@ def run_from_array(
         warning = "handwriting recognition is approximate; classical OCR has a hard ceiling on cursive"
     elif best.mean_conf < 50:
         warning = f"low confidence ({best.mean_conf:.1f}); result may be inaccurate"
+    if engine_used == "from_scratch" and best.mean_conf < 40:
+        warning = (
+            warning + " " if warning else ""
+        ) + "from-scratch engine is approximate; try PyTesseract for tougher pages"
 
     crop_jpg = None
     if encode_crop:
@@ -346,14 +422,15 @@ def run_from_array(
         }
         for p in alts
     ]
+    meta["engine_used"] = engine_used
     _dump_meta(sess, meta)
 
     return PipelineResult(
         text=best.text,
         mean_conf=best.mean_conf,
         language=lang if not is_hw else "eng",
-        document_detected=det.document_detected,
-        detection_score=det.score,
+        document_detected=det_detected,
+        detection_score=det_score,
         psm_used=best.psm,
         pipeline_path=path_label,
         handwriting_detected=is_hw,
@@ -373,6 +450,7 @@ def run_from_array(
         ],
         enhance_mode_used=enhance_mode_used,
         enhanced_mime=enhanced_mime,
+        ocr_engine_used=engine_used,
         crop_jpg=crop_jpg,
         enhanced_bytes=enhanced_bytes,
     )

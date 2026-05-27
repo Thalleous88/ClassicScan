@@ -16,7 +16,7 @@ import { Button } from '@/components/button';
 import { Badge, Eyebrow } from '@/components/card';
 import { Tokens } from '@/constants/theme';
 import { getPreview } from '@/lib/api';
-import type { EnhanceMode } from '@/lib/types';
+import type { EnhanceMode, OcrEngine, Quad } from '@/lib/types';
 
 const MODES: { key: EnhanceMode; label: string }[] = [
   { key: 'color', label: 'Color' },
@@ -25,15 +25,35 @@ const MODES: { key: EnhanceMode; label: string }[] = [
   { key: 'magic', label: 'Magic' },
 ];
 
+const ENGINES: { key: OcrEngine; label: string; sub: string }[] = [
+  { key: 'from_scratch', label: 'From Scratch', sub: 'Fast mode' },
+  { key: 'pytesseract', label: 'PyTesseract', sub: 'Deep search' },
+];
+
 export default function ScanPreviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { uri } = useLocalSearchParams<{ uri: string }>();
+  const { uri, quad: quadParam } = useLocalSearchParams<{
+    uri: string;
+    quad?: string;
+  }>();
 
   const [mode, setMode] = useState<EnhanceMode>('color');
+  const [engine, setEngine] = useState<OcrEngine>('from_scratch');
   const [previewUri, setPreviewUri] = useState<string | undefined>(undefined);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const quadOverride: Quad | null = React.useMemo(() => {
+    if (!quadParam) return null;
+    try {
+      const parsed = JSON.parse(quadParam);
+      if (Array.isArray(parsed) && parsed.length === 4) return parsed as Quad;
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }, [quadParam]);
 
   const reqIdRef = useRef(0);
 
@@ -44,7 +64,7 @@ export default function ScanPreviewScreen() {
     setPreviewError(null);
 
     (async () => {
-      const res = await getPreview(uri, mode);
+      const res = await getPreview(uri, mode, 'auto', quadOverride);
       if (myReqId !== reqIdRef.current) return;
       if (!res.ok) {
         setPreviewError(res.error.message);
@@ -59,13 +79,18 @@ export default function ScanPreviewScreen() {
     return () => {
       reqIdRef.current++;
     };
-  }, [uri, mode]);
+  }, [uri, mode, quadOverride]);
 
   const handleExtractText = () => {
     if (!uri) return;
     router.push({
       pathname: '/processing',
-      params: { imageUri: uri, mode },
+      params: {
+        imageUri: uri,
+        enhanceMode: mode,
+        ocrEngine: engine,
+        ...(quadOverride ? { quad: JSON.stringify(quadOverride) } : {}),
+      },
     });
   };
 
@@ -116,7 +141,7 @@ export default function ScanPreviewScreen() {
       </View>
 
       {}
-      <View style={{ paddingHorizontal: 20, marginBottom: 14 }}>
+      <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {MODES.map((m) => {
             const active = m.key === mode;
@@ -145,6 +170,57 @@ export default function ScanPreviewScreen() {
                   }}
                 >
                   {m.label.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {}
+      <View style={{ paddingHorizontal: 20, marginBottom: 14 }}>
+        <View style={{ marginBottom: 6 }}>
+          <Eyebrow>OCR engine</Eyebrow>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {ENGINES.map((e) => {
+            const active = e.key === engine;
+            return (
+              <TouchableOpacity
+                key={e.key}
+                onPress={() => setEngine(e.key)}
+                activeOpacity={0.85}
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  borderRadius: 12,
+                  backgroundColor: active ? Tokens.accent : Tokens.surface,
+                  borderWidth: 1,
+                  borderColor: active ? Tokens.accent : Tokens.hairline,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? Tokens.accentInk : Tokens.ink,
+                    fontFamily: 'PlusJakartaSans_700Bold',
+                    fontSize: 12,
+                    letterSpacing: 0.6,
+                  }}
+                >
+                  {e.label}
+                </Text>
+                <Text
+                  style={{
+                    color: active ? Tokens.accentInk : Tokens.inkFaint,
+                    fontFamily: 'PlusJakartaSans_500Medium',
+                    fontSize: 10,
+                    marginTop: 2,
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  {e.sub.toUpperCase()}
                 </Text>
               </TouchableOpacity>
             );

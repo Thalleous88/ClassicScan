@@ -72,7 +72,7 @@ export default function CameraScanScreen() {
       }
 
       router.push({
-        pathname: '/scan-preview',
+        pathname: '/adjust-corners' as any,
         params: {
           uri: photo.uri,
         },

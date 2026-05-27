@@ -84,6 +84,7 @@ export default function RootLayout() {
         <Stack.Screen name="sign-up" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="camera-scan" options={{ headerShown: false }} />
+        <Stack.Screen name="adjust-corners" options={{ headerShown: false }} />
         <Stack.Screen name="processing" options={{ headerShown: false }} />
         <Stack.Screen name="scan-preview" options={{ headerShown: false }} />
         <Stack.Screen name="ocr-result" options={{ headerShown: false }} />

@@ -83,3 +83,62 @@ def test_pipeline_respects_max_edge_cap():
     h, w = decoded.shape[:2]
     cap = ml_pipeline.PIPELINE_MAX_EDGE
     assert max(h, w) <= cap + 2, f"long edge {max(h, w)} exceeds cap {cap}"
+
+
+def test_decode_honours_exif_orientation():
+    """A JPEG carrying EXIF orientation = 6 (rotate 90° CW for display) must
+    come back from `_decode` already rotated, so its pixel grid matches what
+    a phone, browser, or any EXIF-aware viewer would show. Without this fix,
+    quad_override coordinates from the frontend land in the wrong coordinate
+    space and the manual crop misaligns with the detected document.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    # Build a 200×100 landscape image; mark the top-LEFT corner with a
+    # 16×16 green block so JPEG's 8×8 DCT compression doesn't smear the
+    # signal. Under 90° CW, original (0, 0) maps to portrait (W-1, 0) =
+    # top-right of the rotated image, where W is the rotated width
+    # (=original height).
+    src = Image.new("RGB", (200, 100), color=(255, 0, 0))
+    for y in range(16):
+        for x in range(16):
+            src.putpixel((x, y), (0, 255, 0))
+
+    exif = src.getexif()
+    exif[0x0112] = 6  # Orientation: rotate 90° CW for display
+
+    buf = BytesIO()
+    src.save(buf, format="JPEG", exif=exif.tobytes(), quality=95)
+
+    bgr = ml_pipeline._decode(buf.getvalue())
+
+    # Pixels must be physically rotated to portrait 100×200.
+    h, w = bgr.shape[:2]
+    assert (w, h) == (100, 200), (
+        f"expected 100×200 portrait after EXIF correction, got {w}×{h}"
+    )
+
+    # Original top-left becomes top-right of the rotated portrait image.
+    # Sample a few pixels in from the corner to dodge any JPEG edge noise.
+    px = bgr[4, w - 5]
+    assert px[1] > 180 and px[0] < 80 and px[2] < 80, (
+        "green marker did not land at top-right after EXIF rotation: "
+        f"BGR={tuple(int(c) for c in px)}"
+    )
+
+
+def test_decode_passthrough_when_no_exif():
+    """A JPEG without an orientation tag must come back at its native size."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    src = Image.new("RGB", (160, 90), color=(20, 40, 60))
+    buf = BytesIO()
+    src.save(buf, format="JPEG", quality=95)
+
+    bgr = ml_pipeline._decode(buf.getvalue())
+    h, w = bgr.shape[:2]
+    assert (w, h) == (160, 90), f"expected 160×90, got {w}×{h}"

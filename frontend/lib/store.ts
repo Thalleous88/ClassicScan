@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import {
+  attachDocxToScan,
   attachPdfToScan,
   deleteScan as apiDeleteScan,
   downloadAsset,
@@ -11,8 +12,11 @@ import {
 } from './api';
 import type {
   ApiResult,
+  AssetKind,
   EnhanceMode,
+  OcrEngine,
   PipelineMode,
+  Quad,
   ScanRecord,
   ScanSummary,
 } from './types';
@@ -107,6 +111,8 @@ export async function createScan(
     enhanceMode?: EnhanceMode;
     name?: string;
     spellCheck?: boolean;
+    ocrEngine?: OcrEngine;
+    quadOverride?: Quad | null;
     signal?: AbortSignal;
   } = {},
 ): Promise<ApiResult<ScanRecord>> {
@@ -116,6 +122,8 @@ export async function createScan(
     name: opts.name,
     returnEnhanced: true,
     spellCheck: opts.spellCheck ?? true,
+    ocrEngine: opts.ocrEngine ?? 'pytesseract',
+    quadOverride: opts.quadOverride ?? null,
     signal: opts.signal,
   });
   if (res.ok) {
@@ -153,14 +161,32 @@ export async function attachPdf(
   return res;
 }
 
+export async function attachDocx(
+  scanId: string,
+  opts: { includeImage?: boolean } = {},
+): Promise<ApiResult<ScanRecord>> {
+  const res = await attachDocxToScan(scanId, opts);
+  if (res.ok) {
+    const summary = recordToSummary(res.data);
+    state = {
+      ...state,
+      details: { ...state.details, [res.data.id]: res.data },
+      scans: state.scans.map((s) => (s.id === res.data.id ? summary : s)),
+    };
+    notify();
+  }
+  return res;
+}
+
 export async function reprocessScan(
   scanId: string,
   mode: PipelineMode,
-  opts: { enhanceMode?: EnhanceMode } = {},
+  opts: { enhanceMode?: EnhanceMode; ocrEngine?: OcrEngine } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const res = await apiReprocessScan(scanId, {
     mode,
     enhanceMode: opts.enhanceMode,
+    ocrEngine: opts.ocrEngine,
   });
   if (res.ok) {
     const summary = recordToSummary(res.data);
@@ -190,7 +216,7 @@ export async function removeScan(id: string): Promise<ApiResult<true>> {
 
 export async function fetchAssetToCache(
   scanId: string,
-  kind: 'raw' | 'enhanced' | 'pdf',
+  kind: AssetKind,
   fileName?: string,
 ): Promise<ApiResult<{ uri: string; mime: string }>> {
   return downloadAsset(scanId, kind, fileName);
@@ -204,10 +230,12 @@ function recordToSummary(r: ScanRecord): ScanSummary {
     bytes_size: r.bytes_size,
     pipeline_path: r.pipeline_path,
     enhance_mode: r.enhance_mode,
+    ocr_engine: r.ocr_engine,
     handwriting_detected: r.handwriting_detected,
     mean_conf: r.mean_conf,
     has_pdf: !!r.assets.pdf,
     has_enhanced: !!r.assets.enhanced,
+    has_docx: !!r.assets.docx,
   };
 }
 
