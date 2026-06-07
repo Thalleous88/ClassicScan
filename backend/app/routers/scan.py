@@ -422,29 +422,48 @@ async def attach_pdf_to_scan(
 ):
     _validate_enhance(enhance_mode)
     scan = _get_owned_scan(scan_id, current_user, db)
-    if not scan.raw_path:
-        raise HTTPException(status_code=400, detail="scan has no raw asset")
 
-    try:
-        raw = storage.read_bytes(scan.raw_path)
-    except Exception:
-        log.exception("failed to read raw asset for scan %s", scan_id)
-        raise HTTPException(status_code=500, detail="failed to read scan asset")
-
-    try:
-        pdf_bytes = await run_in_threadpool(
-            _build_pdf,
-            [raw],
-            enhance_mode,
-            enhance_quality,
-            searchable,
-            lang,
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        log.exception("PDF generation failed for scan %s", scan_id)
-        raise HTTPException(status_code=500, detail="pdf failed")
+    if scan.enhanced_path:
+        try:
+            enhanced = storage.read_bytes(scan.enhanced_path)
+        except Exception:
+            log.exception("failed to read enhanced asset for scan %s", scan_id)
+            raise HTTPException(status_code=500, detail="failed to read scan asset")
+        try:
+            pdf_bytes = await run_in_threadpool(
+                _build_pdf_from_enhanced,
+                [enhanced],
+                scan.text or "",
+                searchable,
+                lang,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            log.exception("PDF generation failed for scan %s", scan_id)
+            raise HTTPException(status_code=500, detail="pdf failed")
+    elif scan.raw_path:
+        try:
+            raw = storage.read_bytes(scan.raw_path)
+        except Exception:
+            log.exception("failed to read raw asset for scan %s", scan_id)
+            raise HTTPException(status_code=500, detail="failed to read scan asset")
+        try:
+            pdf_bytes = await run_in_threadpool(
+                _build_pdf,
+                [raw],
+                enhance_mode,
+                enhance_quality,
+                searchable,
+                lang,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            log.exception("PDF generation failed for scan %s", scan_id)
+            raise HTTPException(status_code=500, detail="pdf failed")
+    else:
+        raise HTTPException(status_code=400, detail="scan has no asset to export")
 
     scan.pdf_path = storage.save_bytes(
         current_user.user_id, scan.id, "pdf", "application/pdf", pdf_bytes
@@ -582,6 +601,60 @@ def _build_pdf(
             chunks: list[bytes] = []
             for raw in enhanced_pages:
                 im = Image.open(io.BytesIO(raw)).convert("RGB")
+                chunk = pytesseract.image_to_pdf_or_hocr(
+                    im, lang=lang, extension="pdf", config="--oem 3 --psm 6"
+                )
+                chunks.append(chunk if isinstance(chunk, (bytes, bytearray)) else bytes(chunk, "latin-1"))
+            if len(chunks) == 1:
+                return chunks[0]
+            try:
+                from pypdf import PdfReader, PdfWriter
+
+                writer = PdfWriter()
+                for c in chunks:
+                    reader = PdfReader(io.BytesIO(c))
+                    for page in reader.pages:
+                        writer.add_page(page)
+                out = io.BytesIO()
+                writer.write(out)
+                return out.getvalue()
+            except Exception:
+                log.warning("pypdf merge failed; falling back to image-only PDF")
+        except Exception:
+            log.exception("searchable PDF generation failed; falling back")
+
+    images = [Image.open(io.BytesIO(raw)).convert("RGB") for raw in enhanced_pages]
+    out = io.BytesIO()
+    if len(images) == 1:
+        images[0].save(out, format="PDF")
+    else:
+        images[0].save(out, format="PDF", save_all=True, append_images=images[1:])
+    return out.getvalue()
+
+
+def _build_pdf_from_enhanced(
+    enhanced_pages: list[bytes],
+    text: str,
+    searchable: bool,
+    lang: str,
+) -> bytes:
+    try:
+        from PIL import Image
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Pillow not installed") from e
+
+    if not enhanced_pages:
+        raise HTTPException(status_code=400, detail="no usable pages")
+
+    use_searchable = searchable and bool(text.strip())
+
+    if use_searchable:
+        try:
+            import pytesseract
+
+            chunks: list[bytes] = []
+            for page_bytes in enhanced_pages:
+                im = Image.open(io.BytesIO(page_bytes)).convert("RGB")
                 chunk = pytesseract.image_to_pdf_or_hocr(
                     im, lang=lang, extension="pdf", config="--oem 3 --psm 6"
                 )
