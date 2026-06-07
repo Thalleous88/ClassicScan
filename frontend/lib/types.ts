@@ -1,6 +1,5 @@
-export type PipelineMode = 'auto' | 'printed' | 'handwriting';
 export type EnhanceMode = 'original' | 'color' | 'gray' | 'bw' | 'magic';
-export type PipelinePath = 'printed' | 'handwriting';
+export type OcrEngine = 'pytesseract' | 'from_scratch';
 
 export type AuthUser = {
   user_id: number;
@@ -19,6 +18,7 @@ export type ScanAssets = {
   raw?: string | null;
   enhanced?: string | null;
   pdf?: string | null;
+  docx?: string | null;
 };
 
 export type ScanRecord = {
@@ -27,15 +27,12 @@ export type ScanRecord = {
   created_at: string;
   original_filename: string | null;
   bytes_size: number;
-  mode: string;
   enhance_mode: EnhanceMode;
-  pipeline_path: PipelinePath;
+  ocr_engine: OcrEngine;
   language: string;
   mean_conf: number;
   document_detected: boolean;
   detection_score: number;
-  handwriting_detected: boolean;
-  handwriting_confidence: number;
   confidence_warning: string | null;
   psm_used: number;
   text: string;
@@ -48,12 +45,12 @@ export type ScanSummary = {
   name: string;
   created_at: string;
   bytes_size: number;
-  pipeline_path: PipelinePath;
   enhance_mode: EnhanceMode;
-  handwriting_detected: boolean;
+  ocr_engine: OcrEngine;
   mean_conf: number;
   has_pdf: boolean;
   has_enhanced: boolean;
+  has_docx: boolean;
 };
 
 export type ApiError = { code: string; message: string; status?: number };
@@ -76,3 +73,5 @@ export type DetectResult = {
   image_width: number;
   image_height: number;
 };
+
+export type AssetKind = 'raw' | 'enhanced' | 'pdf' | 'docx';

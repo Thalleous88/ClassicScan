@@ -6,11 +6,14 @@ from typing import Literal
 
 from app.core.config import get_settings
 
-AssetKind = Literal["raw", "enhanced", "pdf"]
+AssetKind = Literal["raw", "enhanced", "pdf", "docx"]
 _ASSET_FILENAMES: dict[str, dict[str, str]] = {
     "raw": {"image/jpeg": "raw.jpg", "image/png": "raw.png"},
     "enhanced": {"image/jpeg": "enhanced.jpg", "image/png": "enhanced.png"},
     "pdf": {"application/pdf": "scan.pdf"},
+    "docx": {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "scan.docx",
+    },
 }
 
 def _root() -> Path:
@@ -28,6 +31,8 @@ def _filename_for(kind: AssetKind, mime: str) -> str:
         return "raw.jpg"
     if kind == "enhanced":
         return "enhanced.jpg"
+    if kind == "docx":
+        return "scan.docx"
     return "scan.pdf"
 
 def save_bytes(user_id: int, scan_id: str, kind: AssetKind, mime: str, data: bytes) -> str:

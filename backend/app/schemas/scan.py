@@ -5,26 +5,26 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
-PipelineMode = Literal["auto", "printed", "handwriting"]
 EnhanceMode = Literal["original", "color", "gray", "bw", "magic"]
-PipelinePath = Literal["printed", "handwriting"]
+OcrEngine = Literal["pytesseract", "from_scratch"]
 
 class ScanAssets(BaseModel):
     raw: Optional[str] = None
     enhanced: Optional[str] = None
     pdf: Optional[str] = None
+    docx: Optional[str] = None
 
 class ScanListItem(BaseModel):
     id: str
     name: str
     created_at: datetime
     bytes_size: int
-    pipeline_path: PipelinePath
     enhance_mode: EnhanceMode
-    handwriting_detected: bool
+    ocr_engine: OcrEngine = "pytesseract"
     mean_conf: float
     has_pdf: bool
     has_enhanced: bool
+    has_docx: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -35,16 +35,13 @@ class ScanOut(BaseModel):
     original_filename: Optional[str]
     bytes_size: int
 
-    mode: str
     enhance_mode: EnhanceMode
-    pipeline_path: PipelinePath
+    ocr_engine: OcrEngine = "pytesseract"
     language: str
 
     mean_conf: float
     document_detected: bool
     detection_score: float
-    handwriting_detected: bool
-    handwriting_confidence: float
     confidence_warning: Optional[str]
     psm_used: int
 

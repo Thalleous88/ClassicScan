@@ -3,10 +3,11 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { getToken, signOut } from './auth';
 import type {
   ApiResult,
+  AssetKind,
   AuthResponse,
   DetectResult,
   EnhanceMode,
-  PipelineMode,
+  OcrEngine,
   Quad,
   ScanRecord,
   ScanSummary,
@@ -141,23 +142,25 @@ export async function authMe(): Promise<ApiResult<AuthResponse['user']>> {
 export async function extractText(
   uri: string,
   opts: {
-    mode?: PipelineMode;
     enhanceMode?: EnhanceMode;
     returnEnhanced?: boolean;
     spellCheck?: boolean;
     lang?: string;
     name?: string;
+    ocrEngine?: OcrEngine;
+    quadOverride?: Quad | null;
     signal?: AbortSignal;
   } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const form = new FormData();
   form.append('file', fileFromUri(uri) as any);
-  form.append('mode', opts.mode ?? 'auto');
   form.append('enhance_mode', opts.enhanceMode ?? 'color');
   form.append('return_enhanced', String(opts.returnEnhanced ?? true));
   form.append('spell_check', String(opts.spellCheck ?? true));
   form.append('lang', opts.lang ?? 'eng');
+  form.append('ocr_engine', opts.ocrEngine ?? 'pytesseract');
   if (opts.name) form.append('name', opts.name);
+  if (opts.quadOverride) form.append('quad_override', JSON.stringify(opts.quadOverride));
   return safeRequest<ScanRecord>(
     {
       path: '/scan/extract',
@@ -182,12 +185,12 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
 export async function getPreview(
   uri: string,
   enhanceMode: EnhanceMode = 'color',
-  mode: PipelineMode = 'auto',
+  quadOverride?: Quad | null,
 ): Promise<ApiResult<{ uri: string; mime: string }>> {
   const form = new FormData();
   form.append('file', fileFromUri(uri) as any);
   form.append('enhance_mode', enhanceMode);
-  form.append('mode', mode);
+  if (quadOverride) form.append('quad_override', JSON.stringify(quadOverride));
   return safeRequest(
     {
       path: '/scan/preview',
@@ -239,17 +242,17 @@ export async function detectQuad(uri: string): Promise<ApiResult<DetectResult>> 
 export async function reprocessScan(
   scanId: string,
   opts: {
-    mode: PipelineMode;
     enhanceMode?: EnhanceMode;
     lang?: string;
     spellCheck?: boolean;
-  },
+    ocrEngine?: OcrEngine;
+  } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const form = new FormData();
-  form.append('mode', opts.mode);
   if (opts.enhanceMode) form.append('enhance_mode', opts.enhanceMode);
   form.append('lang', opts.lang ?? 'eng');
   form.append('spell_check', String(opts.spellCheck ?? true));
+  form.append('ocr_engine', opts.ocrEngine ?? 'pytesseract');
   return safeRequest<ScanRecord>(
     {
       path: `/scan/${encodeURIComponent(scanId)}/reprocess`,
@@ -265,19 +268,34 @@ export async function attachPdfToScan(
   scanId: string,
   opts: {
     enhanceMode?: EnhanceMode;
-    mode?: PipelineMode;
     searchable?: boolean;
     lang?: string;
   } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const form = new FormData();
   form.append('enhance_mode', opts.enhanceMode ?? 'color');
-  form.append('mode', opts.mode ?? 'auto');
   form.append('searchable', String(opts.searchable ?? true));
   form.append('lang', opts.lang ?? 'eng');
   return safeRequest<ScanRecord>(
     {
       path: `/scan/${encodeURIComponent(scanId)}/pdf`,
+      method: 'POST',
+      body: form as any,
+      timeoutMs: TIMEOUTS.pdf,
+    },
+    (res) => res.json(),
+  );
+}
+
+export async function attachDocxToScan(
+  scanId: string,
+  opts: { includeImage?: boolean } = {},
+): Promise<ApiResult<ScanRecord>> {
+  const form = new FormData();
+  form.append('include_image', String(opts.includeImage ?? true));
+  return safeRequest<ScanRecord>(
+    {
+      path: `/scan/${encodeURIComponent(scanId)}/docx`,
       method: 'POST',
       body: form as any,
       timeoutMs: TIMEOUTS.pdf,
@@ -307,7 +325,7 @@ export async function deleteScan(id: string): Promise<ApiResult<true>> {
   );
 }
 
-export function assetUrl(scanIdOrPath: string, kind?: 'raw' | 'enhanced' | 'pdf'): string {
+export function assetUrl(scanIdOrPath: string, kind?: AssetKind): string {
   if (kind) return `${API_URL}/scan/${encodeURIComponent(scanIdOrPath)}/asset/${kind}`;
 
   if (scanIdOrPath.startsWith('http://') || scanIdOrPath.startsWith('https://')) {
@@ -318,11 +336,17 @@ export function assetUrl(scanIdOrPath: string, kind?: 'raw' | 'enhanced' | 'pdf'
 
 export async function downloadAsset(
   scanId: string,
-  kind: 'raw' | 'enhanced' | 'pdf',
+  kind: AssetKind,
   fileName?: string,
 ): Promise<ApiResult<{ uri: string; mime: string }>> {
-  const ext = kind === 'pdf' ? 'pdf' : 'jpg';
-  const mime = kind === 'pdf' ? 'application/pdf' : 'image/jpeg';
+  const ext =
+    kind === 'pdf' ? 'pdf' : kind === 'docx' ? 'docx' : 'jpg';
+  const mime =
+    kind === 'pdf'
+      ? 'application/pdf'
+      : kind === 'docx'
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : 'image/jpeg';
   const name = fileName ?? `${kind}-${scanId}.${ext}`;
   const url = `${API_URL}/scan/${encodeURIComponent(scanId)}/asset/${kind}`;
   try {

@@ -28,19 +28,17 @@ def test_pipeline_result_has_native_python_types():
 
     assert type(result.mean_conf) is float
     assert type(result.detection_score) is float
-    assert type(result.handwriting_confidence) is float
     assert type(result.psm_used) is int
     assert type(result.document_detected) is bool
-    assert type(result.handwriting_detected) is bool
 
     assert result.enhanced_bytes is None or isinstance(result.enhanced_bytes, bytes)
     assert result.crop_jpg is None or isinstance(result.crop_jpg, bytes)
 
     assert type(result.text) is str
     assert type(result.language) is str
-    assert type(result.pipeline_path) is str
     assert type(result.enhance_mode_used) is str
     assert type(result.enhanced_mime) is str
+    assert type(result.ocr_engine_used) is str
     assert result.confidence_warning is None or type(result.confidence_warning) is str
 
     for w in result.words:
@@ -83,3 +81,54 @@ def test_pipeline_respects_max_edge_cap():
     h, w = decoded.shape[:2]
     cap = ml_pipeline.PIPELINE_MAX_EDGE
     assert max(h, w) <= cap + 2, f"long edge {max(h, w)} exceeds cap {cap}"
+
+
+def test_decode_honours_exif_orientation():
+    """A JPEG carrying EXIF orientation = 6 (rotate 90° CW for display) must
+    come back from `_decode` already rotated, so its pixel grid matches what
+    a phone, browser, or any EXIF-aware viewer would show. Without this fix,
+    quad_override coordinates from the frontend land in the wrong coordinate
+    space and the manual crop misaligns with the detected document.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    src = Image.new("RGB", (200, 100), color=(255, 0, 0))
+    for y in range(16):
+        for x in range(16):
+            src.putpixel((x, y), (0, 255, 0))
+
+    exif = src.getexif()
+    exif[0x0112] = 6
+
+    buf = BytesIO()
+    src.save(buf, format="JPEG", exif=exif.tobytes(), quality=95)
+
+    bgr = ml_pipeline._decode(buf.getvalue())
+
+    h, w = bgr.shape[:2]
+    assert (w, h) == (100, 200), (
+        f"expected 100×200 portrait after EXIF correction, got {w}×{h}"
+    )
+
+    px = bgr[4, w - 5]
+    assert px[1] > 180 and px[0] < 80 and px[2] < 80, (
+        "green marker did not land at top-right after EXIF rotation: "
+        f"BGR={tuple(int(c) for c in px)}"
+    )
+
+
+def test_decode_passthrough_when_no_exif():
+    """A JPEG without an orientation tag must come back at its native size."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    src = Image.new("RGB", (160, 90), color=(20, 40, 60))
+    buf = BytesIO()
+    src.save(buf, format="JPEG", quality=95)
+
+    bgr = ml_pipeline._decode(buf.getvalue())
+    h, w = bgr.shape[:2]
+    assert (w, h) == (160, 90), f"expected 160×90, got {w}×{h}"

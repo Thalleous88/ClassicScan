@@ -12,12 +12,34 @@ import { Button } from '@/components/button';
 import { Eyebrow } from '@/components/card';
 import { Tokens } from '@/constants/theme';
 import { createScan } from '@/lib/store';
-import type { EnhanceMode } from '@/lib/types';
+import type { EnhanceMode, OcrEngine, Quad } from '@/lib/types';
 
 export default function ProcessingScreen() {
   const insets = useSafeAreaInsets();
-  const { imageUri, mode } = useLocalSearchParams<{ imageUri: string; mode?: string }>();
-  const enhanceMode: EnhanceMode = (mode as EnhanceMode) ?? 'color';
+  const {
+    imageUri,
+    enhanceMode: enhanceModeParam,
+    ocrEngine: ocrEngineParam,
+    quad: quadParam,
+  } = useLocalSearchParams<{
+    imageUri: string;
+    enhanceMode?: string;
+    ocrEngine?: string;
+    quad?: string;
+  }>();
+  const enhanceMode: EnhanceMode = (enhanceModeParam ?? 'color') as EnhanceMode;
+  const ocrEngine: OcrEngine =
+    ocrEngineParam === 'pytesseract' ? 'pytesseract' : 'from_scratch';
+  const quadOverride: Quad | null = (() => {
+    if (!quadParam) return null;
+    try {
+      const parsed = JSON.parse(quadParam);
+      if (Array.isArray(parsed) && parsed.length === 4) return parsed as Quad;
+    } catch {
+      /* fall through */
+    }
+    return null;
+  })();
 
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +57,8 @@ export default function ProcessingScreen() {
     let raf: number | null = null;
     let mounted = true;
     const start = Date.now();
-    const expectedMs = 12_000;
+    // From-scratch is faster, PyTesseract is slower
+    const expectedMs = ocrEngine === 'from_scratch' ? 8_000 : 12_000;
 
     const tick = () => {
       if (!mounted) return;
@@ -50,8 +73,9 @@ export default function ProcessingScreen() {
 
     (async () => {
       const res = await createScan(imageUri, {
-        mode: 'auto',
         enhanceMode,
+        ocrEngine,
+        quadOverride,
         signal: ctrl.signal,
       });
       if (!mounted || ctrl.signal.aborted) return;
@@ -75,7 +99,7 @@ export default function ProcessingScreen() {
       if (raf != null) cancelAnimationFrame(raf);
       ctrl.abort();
     };
-  }, [imageUri, enhanceMode]);
+  }, [imageUri, enhanceMode, ocrEngine]);
 
   const cancel = () => {
     ctrlRef.current?.abort();
@@ -85,7 +109,15 @@ export default function ProcessingScreen() {
   const retry = () => {
     setError(null);
     setProgress(0);
-    router.replace({ pathname: '/processing', params: { imageUri, mode: enhanceMode } });
+    router.replace({
+      pathname: '/processing',
+      params: {
+        imageUri,
+        enhanceMode,
+        ocrEngine,
+        ...(quadOverride ? { quad: JSON.stringify(quadOverride) } : {}),
+      },
+    });
   };
 
   const phase = error ? 'ERROR' : done ? 'COMPLETE' : 'PROCESSING';

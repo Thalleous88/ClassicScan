@@ -1,7 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import cv2
 import numpy as np
+
 
 def _line_mask(gray: np.ndarray, axis: str) -> np.ndarray:
     h, w = gray.shape[:2]
@@ -19,6 +20,7 @@ def _line_mask(gray: np.ndarray, axis: str) -> np.ndarray:
         dil = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1))
     return cv2.dilate(extracted, dil, iterations=1)
 
+
 def remove_horizontal_rules(gray: np.ndarray) -> np.ndarray:
     if gray.size == 0:
         return gray
@@ -27,6 +29,7 @@ def remove_horizontal_rules(gray: np.ndarray) -> np.ndarray:
         return gray
     return cv2.inpaint(gray, mask, 3, cv2.INPAINT_TELEA)
 
+
 def remove_vertical_rules(gray: np.ndarray) -> np.ndarray:
     if gray.size == 0:
         return gray
@@ -34,6 +37,7 @@ def remove_vertical_rules(gray: np.ndarray) -> np.ndarray:
     if mask.sum() == 0:
         return gray
     return cv2.inpaint(gray, mask, 3, cv2.INPAINT_TELEA)
+
 
 def remove_rules(gray: np.ndarray, vertical: bool = False) -> np.ndarray:
     out = remove_horizontal_rules(gray)

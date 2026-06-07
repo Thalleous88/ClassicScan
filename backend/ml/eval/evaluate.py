@@ -36,11 +36,11 @@ def _read_manifest(name: str) -> list[str]:
         if line.strip() and not line.startswith("#")
     ]
 
-def _run_track(name: str, mode: str, files: list[str]) -> None:
+def _run_track(name: str, files: list[str], engine: str) -> None:
     if not files:
         print(f"[{name}] no manifest entries")
         return
-    print(f"\n=== {name.upper()} TRACK (mode={mode}) ===")
+    print(f"\n=== {name.upper()} TRACK (engine={engine}) ===")
     rows = []
     for fname in files:
         img = ML_DIR / fname
@@ -53,24 +53,27 @@ def _run_track(name: str, mode: str, files: list[str]) -> None:
             continue
         ref = gt_file.read_text(encoding="utf-8").strip()
         try:
-            r = pipeline.run_from_path(str(img), mode=mode, encode_crop=False)
+            r = pipeline.run_from_path(str(img), encode_crop=False, ocr_engine=engine)
         except Exception as e:
             print(f"  FAIL {fname}: {e}")
             continue
+        actual_engine = r.ocr_engine_used
         cer = _cer(ref, r.text.strip())
         wer = _wer(ref, r.text.strip())
-        rows.append((fname, r.mean_conf, cer, wer))
-        print(f"  {fname:30s} conf={r.mean_conf:6.2f} cer={cer:.3f} wer={wer:.3f}")
+        rows.append((fname, r.mean_conf, cer, wer, actual_engine))
+        print(f"  {fname:30s} engine={actual_engine:14s} conf={r.mean_conf:6.2f} cer={cer:.3f} wer={wer:.3f}")
     if rows:
+        avg_conf = sum(r[1] for r in rows) / len(rows)
         avg_cer = sum(r[2] for r in rows) / len(rows)
         avg_wer = sum(r[3] for r in rows) / len(rows)
-        print(f"  N={len(rows)}  avg CER={avg_cer:.3f}  avg WER={avg_wer:.3f}")
+        print(f"  N={len(rows)}  avg_conf={avg_conf:.2f}  avg CER={avg_cer:.3f}  avg WER={avg_wer:.3f}")
 
 def main() -> None:
     printed = _read_manifest("printed.txt")
     handwriting = _read_manifest("handwriting.txt")
-    _run_track("printed", "printed", printed)
-    _run_track("handwriting", "handwriting", handwriting)
+    for engine in ("pytesseract", "from_scratch"):
+        _run_track("printed", printed, engine)
+        _run_track("handwriting", handwriting, engine)
 
 if __name__ == "__main__":
     main()
