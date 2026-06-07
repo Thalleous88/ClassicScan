@@ -19,17 +19,15 @@ export default function ProcessingScreen() {
   const {
     imageUri,
     enhanceMode: enhanceModeParam,
-    mode: legacyModeParam,
     ocrEngine: ocrEngineParam,
     quad: quadParam,
   } = useLocalSearchParams<{
     imageUri: string;
     enhanceMode?: string;
-    mode?: string;
     ocrEngine?: string;
     quad?: string;
   }>();
-  const enhanceMode: EnhanceMode = (enhanceModeParam ?? legacyModeParam ?? 'color') as EnhanceMode;
+  const enhanceMode: EnhanceMode = (enhanceModeParam ?? 'color') as EnhanceMode;
   const ocrEngine: OcrEngine =
     ocrEngineParam === 'pytesseract' ? 'pytesseract' : 'from_scratch';
   const quadOverride: Quad | null = (() => {
@@ -75,7 +73,6 @@ export default function ProcessingScreen() {
 
     (async () => {
       const res = await createScan(imageUri, {
-        mode: 'auto',
         enhanceMode,
         ocrEngine,
         quadOverride,

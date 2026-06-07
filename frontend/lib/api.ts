@@ -8,7 +8,6 @@ import type {
   DetectResult,
   EnhanceMode,
   OcrEngine,
-  PipelineMode,
   Quad,
   ScanRecord,
   ScanSummary,
@@ -143,7 +142,6 @@ export async function authMe(): Promise<ApiResult<AuthResponse['user']>> {
 export async function extractText(
   uri: string,
   opts: {
-    mode?: PipelineMode;
     enhanceMode?: EnhanceMode;
     returnEnhanced?: boolean;
     spellCheck?: boolean;
@@ -156,7 +154,6 @@ export async function extractText(
 ): Promise<ApiResult<ScanRecord>> {
   const form = new FormData();
   form.append('file', fileFromUri(uri) as any);
-  form.append('mode', opts.mode ?? 'auto');
   form.append('enhance_mode', opts.enhanceMode ?? 'color');
   form.append('return_enhanced', String(opts.returnEnhanced ?? true));
   form.append('spell_check', String(opts.spellCheck ?? true));
@@ -188,13 +185,11 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
 export async function getPreview(
   uri: string,
   enhanceMode: EnhanceMode = 'color',
-  mode: PipelineMode = 'auto',
   quadOverride?: Quad | null,
 ): Promise<ApiResult<{ uri: string; mime: string }>> {
   const form = new FormData();
   form.append('file', fileFromUri(uri) as any);
   form.append('enhance_mode', enhanceMode);
-  form.append('mode', mode);
   if (quadOverride) form.append('quad_override', JSON.stringify(quadOverride));
   return safeRequest(
     {
@@ -247,15 +242,13 @@ export async function detectQuad(uri: string): Promise<ApiResult<DetectResult>> 
 export async function reprocessScan(
   scanId: string,
   opts: {
-    mode: PipelineMode;
     enhanceMode?: EnhanceMode;
     lang?: string;
     spellCheck?: boolean;
     ocrEngine?: OcrEngine;
-  },
+  } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const form = new FormData();
-  form.append('mode', opts.mode);
   if (opts.enhanceMode) form.append('enhance_mode', opts.enhanceMode);
   form.append('lang', opts.lang ?? 'eng');
   form.append('spell_check', String(opts.spellCheck ?? true));
@@ -275,14 +268,12 @@ export async function attachPdfToScan(
   scanId: string,
   opts: {
     enhanceMode?: EnhanceMode;
-    mode?: PipelineMode;
     searchable?: boolean;
     lang?: string;
   } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const form = new FormData();
   form.append('enhance_mode', opts.enhanceMode ?? 'color');
-  form.append('mode', opts.mode ?? 'auto');
   form.append('searchable', String(opts.searchable ?? true));
   form.append('lang', opts.lang ?? 'eng');
   return safeRequest<ScanRecord>(

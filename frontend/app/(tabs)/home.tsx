@@ -10,7 +10,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Badge, Eyebrow } from '@/components/card';
+import { Eyebrow } from '@/components/card';
 import { Tokens } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
 import { formatBytes, refreshScans, useScanStore } from '@/lib/store';
@@ -294,12 +294,6 @@ export default function HomeScreen() {
                       {relativeDate(item.created_at)} · {formatBytes(item.bytes_size)}
                       {item.has_pdf ? ' · PDF' : ''}
                     </Text>
-                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 2 }}>
-                      <Badge
-                        label={item.handwriting_detected ? 'Handwriting' : 'Printed'}
-                        variant={item.handwriting_detected ? 'warning' : 'accent'}
-                      />
-                    </View>
                   </View>
 
                   <Ionicons name="chevron-forward" size={18} color={Tokens.inkFaint} />

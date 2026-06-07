@@ -11,7 +11,7 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-from . import classify, detector, enhancer, ocr, ocr_from_scratch, scanner_enhance
+from . import detector, enhancer, ocr, ocr_from_scratch, scanner_enhance
 
 DEBUG_DIR = Path(__file__).resolve().parent / "debug"
 
@@ -52,9 +52,6 @@ class PipelineResult:
     document_detected: bool
     detection_score: float
     psm_used: int
-    pipeline_path: str
-    handwriting_detected: bool
-    handwriting_confidence: float
     confidence_warning: Optional[str]
     words: list[WordOut]
     text_alternatives: list[AlternativeOut] = field(default_factory=list)
@@ -65,13 +62,10 @@ class PipelineResult:
     enhanced_bytes: Optional[bytes] = None
 
     def __post_init__(self) -> None:
-
         self.mean_conf = float(self.mean_conf)
         self.detection_score = float(self.detection_score)
-        self.handwriting_confidence = float(self.handwriting_confidence)
         self.psm_used = int(self.psm_used)
         self.document_detected = bool(self.document_detected)
-        self.handwriting_detected = bool(self.handwriting_detected)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -80,16 +74,6 @@ class PipelineResult:
         return d
 
 def _decode(image_bytes: bytes) -> np.ndarray:
-    """Decode JPEG/PNG bytes into a BGR numpy array, honouring EXIF orientation.
-
-    Phone captures (especially from iOS) carry an EXIF orientation tag that
-    `cv2.imdecode` ignores. If we trusted cv2's raw pixel grid, the image
-    the user sees on screen and the image the pipeline processes would have
-    different dimensions and orientations, so any quad coordinates the user
-    supplied would land in the wrong place. Pillow's `exif_transpose`
-    physically rotates the pixels and strips the orientation tag, giving us
-    one canonical pixel grid that matches what the device renders.
-    """
     from io import BytesIO
 
     from PIL import Image, ImageOps
@@ -125,46 +109,11 @@ def _dump_meta(sess: Optional[Path], meta: dict) -> None:
         return
     (sess / "meta.json").write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
 
-def _run_both_paths(
-    warped: np.ndarray,
-    hw_gray: np.ndarray,
-    raw_full: np.ndarray,
-    lang: str,
-    spell_check: bool,
-    prefer_handwriting: bool,
-    printed_imgs: Optional[dict[str, np.ndarray]] = None,
-) -> tuple[Any, list, str]:
-    if printed_imgs is None:
-        gray_path = enhancer.grayscale_path(warped)
-        bin_path = enhancer.binarized_path(warped)
-        printed_imgs = {"gray": gray_path, "binary": bin_path, "raw": raw_full}
-
-    p_best, p_alts = ocr.run_printed(printed_imgs, lang=lang, spell_check=spell_check)
-    h_best, h_alts = ocr.run_handwriting(
-        {"handwriting_gray": hw_gray, "raw": raw_full}, spell_check=False
-    )
-
-    p_conf = float(p_best.mean_conf)
-    h_conf = float(h_best.mean_conf)
-    delta = p_conf - h_conf
-
-    if abs(delta) < 5.0:
-        picked = "handwriting" if prefer_handwriting else "printed"
-    elif delta > 0:
-        picked = "printed"
-    else:
-        picked = "handwriting"
-
-    if picked == "printed":
-        return p_best, p_alts + h_alts, "printed"
-    return h_best, h_alts + p_alts, "handwriting"
-
 def run_from_bytes(
     image_bytes: bytes,
     lang: str = ocr.DEFAULT_LANG,
     spell_check: bool = True,
     encode_crop: bool = True,
-    mode: str = "auto",
     enhance_mode: str = "color",
     enhance_quality: int = 88,
     return_enhanced: bool = False,
@@ -178,7 +127,6 @@ def run_from_bytes(
         lang=lang,
         spell_check=spell_check,
         encode_crop=encode_crop,
-        mode=mode,
         enhance_mode=enhance_mode,
         enhance_quality=enhance_quality,
         return_enhanced=return_enhanced,
@@ -198,7 +146,6 @@ def run_from_array(
     lang: str = ocr.DEFAULT_LANG,
     spell_check: bool = True,
     encode_crop: bool = True,
-    mode: str = "auto",
     enhance_mode: str = "color",
     enhance_quality: int = 88,
     return_enhanced: bool = False,
@@ -210,7 +157,6 @@ def run_from_array(
         ocr_engine = "pytesseract"
     sess = _new_debug_session()
     meta: dict = {
-        "mode_requested": mode,
         "lang": lang,
         "enhance_mode": enhance_mode,
         "ocr_engine": ocr_engine,
@@ -257,27 +203,8 @@ def run_from_array(
         meta["downsampled"] = {"from": [h_w, w_w], "to": [new_h, new_w], "scale": scale}
     _dump(sess, "03_warped.jpg", warped)
 
-    cls = classify.classify(warped)
-    meta["classify"] = {
-        "is_handwriting": cls.is_handwriting,
-        "confidence": cls.confidence,
-        "signals": cls.signals,
-    }
-
-    if mode == "printed":
-        is_hw = False
-        borderline = False
-    elif mode == "handwriting":
-        is_hw = True
-        borderline = False
-    else:
-        is_hw = cls.is_handwriting
-
-        borderline = 0.45 <= cls.confidence < 0.65
-
-    if not is_hw:
-        warped = detector.auto_orient(warped)
-        _dump(sess, "04_oriented.jpg", warped)
+    warped = detector.auto_orient(warped)
+    _dump(sess, "04_oriented.jpg", warped)
     warped = detector.deskew(warped)
     _dump(sess, "05_deskewed.jpg", warped)
     warped = detector.normalize_dpi(warped)
@@ -310,13 +237,10 @@ def run_from_array(
         return PipelineResult(
             text="",
             mean_conf=0.0,
-            language=lang if not is_hw else "eng",
+            language=lang,
             document_detected=det_detected,
             detection_score=det_score,
             psm_used=0,
-            pipeline_path="handwriting" if is_hw else "printed",
-            handwriting_detected=is_hw,
-            handwriting_confidence=cls.confidence,
             confidence_warning=None,
             words=[],
             text_alternatives=[],
@@ -328,76 +252,31 @@ def run_from_array(
         )
 
     engine_used = ocr_engine
+    gray_path = enhancer.grayscale_path(warped)
+    _dump(sess, "07_gray_path.jpg", gray_path)
+    bin_path = enhancer.binarized_path(warped)
+    _dump(sess, "08_binary_path.jpg", bin_path)
 
-    if is_hw:
-        hw_gray = enhancer.handwriting_path(warped)
-        _dump(sess, "09_handwriting_path.jpg", hw_gray)
-        if borderline:
-            best, alts, picked = _run_both_paths(
-                warped, hw_gray, raw_full, lang, spell_check, prefer_handwriting=True
+    printed_imgs = {"gray": gray_path, "binary": bin_path, "raw": raw_full}
+    if ocr_engine == "from_scratch":
+        if ocr_from_scratch.has_model():
+            best, alts = ocr_from_scratch.run_printed(
+                printed_imgs, lang=lang, spell_check=spell_check
             )
-            is_hw = picked == "handwriting"
-            path_label = picked
-            meta["borderline_both_branch"] = picked
-            if ocr_engine == "from_scratch":
-                engine_used = "pytesseract"
-                meta["from_scratch_fallback"] = "handwriting"
         else:
-            best, alts = ocr.run_handwriting(
-                {"handwriting_gray": hw_gray, "raw": raw_full},
-                spell_check=False,
+            best, alts = ocr.run_printed(
+                printed_imgs, lang=lang, spell_check=spell_check
             )
-            path_label = "handwriting"
-            if ocr_engine == "from_scratch":
-                engine_used = "pytesseract"
-                meta["from_scratch_fallback"] = "handwriting"
+            engine_used = "pytesseract"
+            meta["from_scratch_fallback"] = "model_missing"
     else:
-        gray_path = enhancer.grayscale_path(warped)
-        _dump(sess, "07_gray_path.jpg", gray_path)
-        bin_path = enhancer.binarized_path(warped)
-        _dump(sess, "08_binary_path.jpg", bin_path)
-        if borderline:
-            hw_gray = enhancer.handwriting_path(warped)
-            _dump(sess, "09_handwriting_path.jpg", hw_gray)
-            best, alts, picked = _run_both_paths(
-                warped, hw_gray, raw_full, lang, spell_check,
-                prefer_handwriting=False,
-                printed_imgs={"gray": gray_path, "binary": bin_path, "raw": raw_full},
-            )
-            is_hw = picked == "handwriting"
-            path_label = picked
-            meta["borderline_both_branch"] = picked
-            if ocr_engine == "from_scratch":
-                engine_used = "pytesseract"
-                meta["from_scratch_fallback"] = "borderline"
-        else:
-            printed_imgs = {"gray": gray_path, "binary": bin_path, "raw": raw_full}
-            if ocr_engine == "from_scratch":
-                if ocr_from_scratch.has_model():
-                    best, alts = ocr_from_scratch.run_printed(
-                        printed_imgs, lang=lang, spell_check=spell_check
-                    )
-                else:
-                    best, alts = ocr.run_printed(
-                        printed_imgs, lang=lang, spell_check=spell_check
-                    )
-                    engine_used = "pytesseract"
-                    meta["from_scratch_fallback"] = "model_missing"
-            else:
-                best, alts = ocr.run_printed(
-                    printed_imgs, lang=lang, spell_check=spell_check
-                )
-            path_label = "printed"
+        best, alts = ocr.run_printed(
+            printed_imgs, lang=lang, spell_check=spell_check
+        )
 
     warning: Optional[str] = None
-    if is_hw:
-        warning = "handwriting recognition is approximate; classical OCR has a hard ceiling on cursive"
-    elif best.mean_conf < 50:
+    if best.mean_conf < 50:
         warning = f"low confidence ({best.mean_conf:.1f}); result may be inaccurate"
-    if engine_used == "from_scratch" and best.mean_conf < 40:
-        warning = (
-            warning + " " if warning else ""
-        ) + "from-scratch engine is approximate; try PyTesseract for tougher pages"
 
     crop_jpg = None
     if encode_crop:
@@ -428,13 +307,10 @@ def run_from_array(
     return PipelineResult(
         text=best.text,
         mean_conf=best.mean_conf,
-        language=lang if not is_hw else "eng",
+        language=lang,
         document_detected=det_detected,
         detection_score=det_score,
         psm_used=best.psm,
-        pipeline_path=path_label,
-        handwriting_detected=is_hw,
-        handwriting_confidence=cls.confidence,
         confidence_warning=warning,
         words=[WordOut(text=w.text, conf=w.conf, bbox=w.bbox) for w in best.words],
         text_alternatives=[

@@ -64,7 +64,7 @@ export default function ScanPreviewScreen() {
     setPreviewError(null);
 
     (async () => {
-      const res = await getPreview(uri, mode, 'auto', quadOverride);
+      const res = await getPreview(uri, mode, quadOverride);
       if (myReqId !== reqIdRef.current) return;
       if (!res.ok) {
         setPreviewError(res.error.message);

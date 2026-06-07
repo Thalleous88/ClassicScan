@@ -14,7 +14,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Badge, Eyebrow } from '@/components/card';
+import { Eyebrow } from '@/components/card';
 import { Tokens } from '@/constants/theme';
 import { signOut } from '@/lib/auth';
 import { formatBytes, refreshScans, removeScan, useScanStore } from '@/lib/store';
@@ -291,10 +291,6 @@ export default function HistoryScreen() {
                   {item.has_pdf ? ' · PDF' : ''}
                 </Text>
               </View>
-
-              {item.handwriting_detected ? (
-                <Badge label="HW" variant="warning" />
-              ) : null}
             </TouchableOpacity>
           )}
         />

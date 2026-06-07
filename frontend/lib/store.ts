@@ -15,7 +15,6 @@ import type {
   AssetKind,
   EnhanceMode,
   OcrEngine,
-  PipelineMode,
   Quad,
   ScanRecord,
   ScanSummary,
@@ -107,7 +106,6 @@ export function getCachedScan(id: string): ScanRecord | undefined {
 export async function createScan(
   uri: string,
   opts: {
-    mode?: PipelineMode;
     enhanceMode?: EnhanceMode;
     name?: string;
     spellCheck?: boolean;
@@ -117,7 +115,6 @@ export async function createScan(
   } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const res = await apiExtractText(uri, {
-    mode: opts.mode ?? 'auto',
     enhanceMode: opts.enhanceMode ?? 'color',
     name: opts.name,
     returnEnhanced: true,
@@ -180,11 +177,9 @@ export async function attachDocx(
 
 export async function reprocessScan(
   scanId: string,
-  mode: PipelineMode,
   opts: { enhanceMode?: EnhanceMode; ocrEngine?: OcrEngine } = {},
 ): Promise<ApiResult<ScanRecord>> {
   const res = await apiReprocessScan(scanId, {
-    mode,
     enhanceMode: opts.enhanceMode,
     ocrEngine: opts.ocrEngine,
   });
@@ -228,10 +223,8 @@ function recordToSummary(r: ScanRecord): ScanSummary {
     name: r.name,
     created_at: r.created_at,
     bytes_size: r.bytes_size,
-    pipeline_path: r.pipeline_path,
     enhance_mode: r.enhance_mode,
     ocr_engine: r.ocr_engine,
-    handwriting_detected: r.handwriting_detected,
     mean_conf: r.mean_conf,
     has_pdf: !!r.assets.pdf,
     has_enhanced: !!r.assets.enhanced,

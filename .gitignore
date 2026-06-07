@@ -216,6 +216,9 @@ Thumbs.db
 backend/ml/debug/
 backend/ml/scanner_out.jpg
 
+# Trained model artifacts (too large for GitHub)
+backend/ml/models/*.joblib
+
 # Per-user scan storage (raw / enhanced / pdf bytes)
 backend/storage/
 

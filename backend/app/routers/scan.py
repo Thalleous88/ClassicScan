@@ -41,16 +41,11 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 log = logging.getLogger(__name__)
 _settings = get_settings()
 
-_VALID_MODES = ("auto", "printed", "handwriting")
 _VALID_ASSET_KINDS = ("raw", "enhanced", "pdf", "docx")
 _VALID_ENGINES = ("pytesseract", "from_scratch")
 _DOCX_MIME = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
-
-def _validate_mode(mode: str) -> None:
-    if mode not in _VALID_MODES:
-        raise HTTPException(status_code=400, detail="invalid mode")
 
 def _validate_enhance(mode: str) -> None:
     if mode not in scanner_enhance.MODES:
@@ -120,16 +115,12 @@ def _to_scan_out(scan: ScanModel) -> ScanOut:
         created_at=scan.created_at,
         original_filename=scan.original_filename,
         bytes_size=scan.bytes_size,
-        mode=scan.mode,
         enhance_mode=scan.enhance_mode,
-        pipeline_path=scan.pipeline_path,
         ocr_engine=getattr(scan, "ocr_engine", None) or "pytesseract",
         language=scan.language,
         mean_conf=scan.mean_conf,
         document_detected=scan.document_detected,
         detection_score=scan.detection_score,
-        handwriting_detected=scan.handwriting_detected,
-        handwriting_confidence=scan.handwriting_confidence,
         confidence_warning=scan.confidence_warning,
         psm_used=scan.psm_used,
         text=scan.text,
@@ -170,7 +161,6 @@ async def extract(
     lang: str = Form(default="eng"),
     spell_check: bool = Form(default=True),
     return_enhanced: bool = Form(default=True),
-    mode: str = Form(default="auto"),
     enhance_mode: str = Form(default="color"),
     enhance_quality: int = Form(default=88),
     name: Optional[str] = Form(default=None),
@@ -179,7 +169,6 @@ async def extract(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _validate_mode(mode)
     _validate_enhance(enhance_mode)
     _validate_engine(ocr_engine)
     quad_arr = _parse_quad_override(quad_override)
@@ -195,7 +184,6 @@ async def extract(
             lang,
             spell_check,
             False,
-            mode,
             enhance_mode,
             enhance_quality,
             return_enhanced,
@@ -216,15 +204,11 @@ async def extract(
         name=name or _default_name(file.filename),
         original_filename=file.filename,
         bytes_size=len(data),
-        mode=mode,
         enhance_mode=result.enhance_mode_used,
-        pipeline_path=result.pipeline_path,
         ocr_engine=result.ocr_engine_used,
         mean_conf=result.mean_conf,
         document_detected=result.document_detected,
         detection_score=result.detection_score,
-        handwriting_detected=result.handwriting_detected,
-        handwriting_confidence=result.handwriting_confidence,
         confidence_warning=result.confidence_warning,
         psm_used=result.psm_used,
         language=result.language,
@@ -238,14 +222,12 @@ async def extract(
         db.rollback()
         log.exception(
             "DB flush failed for new scan; numeric field types: "
-            "mean_conf=%s detection_score=%s handwriting_confidence=%s psm_used=%s "
-            "document_detected=%s handwriting_detected=%s",
+            "mean_conf=%s detection_score=%s psm_used=%s "
+            "document_detected=%s",
             type(scan.mean_conf).__name__,
             type(scan.detection_score).__name__,
-            type(scan.handwriting_confidence).__name__,
             type(scan.psm_used).__name__,
             type(scan.document_detected).__name__,
-            type(scan.handwriting_detected).__name__,
         )
         raise HTTPException(status_code=500, detail="failed to persist scan")
 
@@ -277,11 +259,9 @@ async def preview(
     file: UploadFile = File(...),
     enhance_mode: str = Form(default="color"),
     enhance_quality: int = Form(default=88),
-    mode: str = Form(default="auto"),
     quad_override: Optional[str] = Form(default=None),
     current_user: User = Depends(get_current_user),
 ):
-    _validate_mode(mode)
     _validate_enhance(enhance_mode)
     quad_arr = _parse_quad_override(quad_override)
     data = await _read_capped(file, request)
@@ -294,7 +274,6 @@ async def preview(
             "eng",
             False,
             False,
-            mode,
             enhance_mode,
             enhance_quality,
             True,
@@ -356,7 +335,6 @@ async def detect(
 @router.post("/{scan_id}/reprocess", response_model=ScanOut)
 async def reprocess(
     scan_id: str = PathParam(...),
-    mode: str = Form(...),
     enhance_mode: Optional[str] = Form(default=None),
     enhance_quality: int = Form(default=88),
     lang: str = Form(default="eng"),
@@ -365,7 +343,6 @@ async def reprocess(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _validate_mode(mode)
     _validate_engine(ocr_engine)
     target_enhance = enhance_mode or "color"
     _validate_enhance(target_enhance)
@@ -388,7 +365,6 @@ async def reprocess(
             lang,
             spell_check,
             False,
-            mode,
             target_enhance,
             enhance_quality,
             True,
@@ -421,13 +397,9 @@ async def reprocess(
                 status_code=500, detail="failed to persist enhanced asset"
             )
 
-    scan.mode = mode
     scan.enhance_mode = result.enhance_mode_used
-    scan.pipeline_path = result.pipeline_path
     scan.ocr_engine = result.ocr_engine_used
     scan.mean_conf = result.mean_conf
-    scan.handwriting_detected = result.handwriting_detected
-    scan.handwriting_confidence = result.handwriting_confidence
     scan.confidence_warning = result.confidence_warning
     scan.psm_used = result.psm_used
     scan.language = result.language
@@ -443,13 +415,11 @@ async def attach_pdf_to_scan(
     scan_id: str = PathParam(...),
     enhance_mode: str = Form(default="color"),
     enhance_quality: int = Form(default=88),
-    mode: str = Form(default="auto"),
     searchable: bool = Form(default=True),
     lang: str = Form(default="eng"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _validate_mode(mode)
     _validate_enhance(enhance_mode)
     scan = _get_owned_scan(scan_id, current_user, db)
     if not scan.raw_path:
@@ -465,7 +435,6 @@ async def attach_pdf_to_scan(
         pdf_bytes = await run_in_threadpool(
             _build_pdf,
             [raw],
-            mode,
             enhance_mode,
             enhance_quality,
             searchable,
@@ -532,12 +501,10 @@ async def standalone_pdf(
     files: List[UploadFile] = File(...),
     enhance_mode: str = Form(default="color"),
     enhance_quality: int = Form(default=88),
-    mode: str = Form(default="auto"),
     searchable: bool = Form(default=True),
     lang: str = Form(default="eng"),
     current_user: User = Depends(get_current_user),
 ):
-    _validate_mode(mode)
     _validate_enhance(enhance_mode)
     if not files:
         raise HTTPException(status_code=400, detail="no files")
@@ -559,7 +526,6 @@ async def standalone_pdf(
         pdf_bytes = await run_in_threadpool(
             _build_pdf,
             pages,
-            mode,
             enhance_mode,
             enhance_quality,
             searchable,
@@ -574,7 +540,6 @@ async def standalone_pdf(
 
 def _build_pdf(
     page_bytes_list: list[bytes],
-    mode: str,
     enhance_mode: str,
     enhance_quality: int,
     searchable: bool,
@@ -593,7 +558,6 @@ def _build_pdf(
             lang,
             True,
             False,
-            mode,
             enhance_mode,
             enhance_quality,
             True,
@@ -607,7 +571,7 @@ def _build_pdf(
         raise HTTPException(status_code=400, detail="no usable pages")
 
     use_searchable = searchable and all(
-        p.pipeline_path == "printed" and p.mean_conf >= 60 and p.enhance_mode_used != "bw"
+        p.mean_conf >= 60 and p.enhance_mode_used != "bw"
         for p in page_results
     )
 
@@ -650,7 +614,6 @@ def _build_pdf(
 
 
 def _build_docx(title: str, text: str, image_bytes: Optional[bytes]) -> bytes:
-    """Render a minimal .docx with optional embedded enhanced image + text."""
     try:
         from docx import Document
         from docx.shared import Inches, Pt
@@ -703,10 +666,8 @@ def history(
             name=r.name,
             created_at=r.created_at,
             bytes_size=r.bytes_size,
-            pipeline_path=r.pipeline_path,
             enhance_mode=r.enhance_mode,
             ocr_engine=getattr(r, "ocr_engine", None) or "pytesseract",
-            handwriting_detected=r.handwriting_detected,
             mean_conf=r.mean_conf,
             has_pdf=bool(r.pdf_path),
             has_enhanced=bool(r.enhanced_path),

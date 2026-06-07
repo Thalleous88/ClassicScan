@@ -21,6 +21,7 @@ CHAR_BOX = 32
 HOG_CELL = 8
 HOG_BIN = 9
 ZONING_GRID = 4
+CROSSING_POSITIONS = 4
 
 ALPHABET: list[str] = (
     list(string.ascii_uppercase)
@@ -55,7 +56,6 @@ _LABELS_CACHE: Optional[list[str]] = None
 
 
 def _load_model() -> tuple[Optional[object], Optional[list[str]]]:
-    """Load the trained classifier on first use. Tolerant of missing model."""
     global _MODEL_CACHE, _LABELS_CACHE
     if _MODEL_CACHE is not None:
         return _MODEL_CACHE, _LABELS_CACHE
@@ -87,10 +87,7 @@ def has_model() -> bool:
     return MODEL_PATH.exists()
 
 
-
-
 def _segment_lines(bw_inv: np.ndarray) -> list[tuple[int, int]]:
-    """Find (y0, y1) bands containing text lines via projection profile."""
     if bw_inv.size == 0:
         return []
     proj = bw_inv.sum(axis=1).astype(np.float32)
@@ -120,43 +117,96 @@ def _segment_lines(bw_inv: np.ndarray) -> list[tuple[int, int]]:
 
 
 def _segment_words(bw_inv_line: np.ndarray) -> list[tuple[int, int]]:
-    """Find (x0, x1) word bands inside a single line strip."""
     if bw_inv_line.size == 0:
         return []
-    col = bw_inv_line.sum(axis=0).astype(np.float32)
-    active = col > 0
     h = bw_inv_line.shape[0]
-    gap_thresh = max(4, int(round(h * 0.45)))
-    bands: list[tuple[int, int]] = []
-    start: Optional[int] = None
-    blank_run = 0
-    last_active = -1
-    for i, v in enumerate(active):
-        if v:
-            if start is None:
-                start = i
-            last_active = i
-            blank_run = 0
+
+    n, _, stats, _ = cv2.connectedComponentsWithStats(bw_inv_line, connectivity=8)
+    if n <= 1:
+        return []
+
+    cc_spans: list[tuple[int, int]] = []
+    for i in range(1, n):
+        x = int(stats[i, cv2.CC_STAT_LEFT])
+        w = int(stats[i, cv2.CC_STAT_WIDTH])
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        if area < 3 or w < 1:
+            continue
+        cc_spans.append((x, x + w))
+
+    if len(cc_spans) < 2:
+        col = bw_inv_line.sum(axis=0).astype(np.float32)
+        active = col > 0
+        xs = np.where(active)[0]
+        if len(xs) == 0:
+            return []
+        return [(int(xs[0]), int(xs[-1]) + 1)]
+
+    cc_spans.sort(key=lambda s: s[0])
+
+    merged_spans: list[tuple[int, int]] = [cc_spans[0]]
+    for start, end in cc_spans[1:]:
+        prev_start, prev_end = merged_spans[-1]
+        if start <= prev_end + 1:
+            merged_spans[-1] = (prev_start, max(prev_end, end))
         else:
-            if start is not None:
-                blank_run += 1
-                if blank_run >= gap_thresh:
-                    bands.append((start, last_active + 1))
-                    start = None
-                    blank_run = 0
-    if start is not None:
-        bands.append((start, last_active + 1))
-    return bands
+            merged_spans.append((start, end))
+
+    if len(merged_spans) < 2:
+        col = bw_inv_line.sum(axis=0).astype(np.float32)
+        active = col > 0
+        xs = np.where(active)[0]
+        if len(xs) == 0:
+            return []
+        return [(int(xs[0]), int(xs[-1]) + 1)]
+
+    gaps: list[int] = []
+    for i in range(1, len(merged_spans)):
+        gap = merged_spans[i][0] - merged_spans[i - 1][1]
+        gaps.append(gap)
+
+    if not gaps:
+        col = bw_inv_line.sum(axis=0).astype(np.float32)
+        active = col > 0
+        xs = np.where(active)[0]
+        if len(xs) == 0:
+            return []
+        return [(int(xs[0]), int(xs[-1]) + 1)]
+
+    gap_arr = np.array(gaps, dtype=np.float32)
+    if len(gaps) >= 4:
+        sorted_gaps = np.sort(gap_arr)
+        q25 = float(sorted_gaps[len(sorted_gaps) // 4])
+        q75 = float(sorted_gaps[3 * len(sorted_gaps) // 4])
+        iqr = q75 - q25
+        if iqr > 1:
+            threshold = q25 + 0.5 * iqr
+        else:
+            threshold = float(np.median(gap_arr)) * 1.2
+        threshold = max(threshold, max(3, h * 0.15))
+        threshold = min(threshold, max(6, h * 0.5))
+    else:
+        median_gap = float(np.median(gap_arr))
+        threshold = max(median_gap * 1.3, max(3, h * 0.15))
+        threshold = min(threshold, max(6, h * 0.5))
+
+    word_bands: list[tuple[int, int]] = []
+    word_start = merged_spans[0][0]
+    word_end = merged_spans[0][1]
+    for i, gap in enumerate(gaps):
+        if gap >= threshold:
+            word_bands.append((word_start, word_end))
+            word_start = merged_spans[i + 1][0]
+            word_end = merged_spans[i + 1][1]
+        else:
+            word_end = max(word_end, merged_spans[i + 1][1])
+    word_bands.append((word_start, word_end))
+    return word_bands
 
 
 def _split_wide_cc(
     cc_box: tuple[int, int, int, int], median_h: float
 ) -> list[tuple[int, int, int, int]]:
-    """Split a connected component box that's too wide to be a single char.
-
-    Real touching letters; we just slice equally — accuracy is approximate
-    by design.
-    """
     x, y, w, h = cc_box
     if median_h <= 0 or w <= median_h * 1.2:
         return [cc_box]
@@ -171,29 +221,119 @@ def _split_wide_cc(
     return out
 
 
+def _merge_dots_to_stems(
+    boxes: list[tuple[int, int, int, int]], median_h: float
+) -> list[tuple[int, int, int, int]]:
+    if not boxes or median_h <= 0:
+        return boxes
+
+    stem_thresh = max(2, median_h * 0.12)
+    dot_max_h = max(4, median_h * 0.35)
+    dot_max_w = max(3, median_h * 0.30)
+
+    stems: list[tuple[int, int, int, int]] = []
+    dots: list[tuple[int, int, int, int]] = []
+    others: list[tuple[int, int, int, int]] = []
+
+    for b in boxes:
+        x, y, w, h = b
+        aspect = w / max(1.0, h)
+        if h <= dot_max_h and w <= dot_max_w and aspect <= 1.5:
+            dots.append(b)
+        elif h > median_h * 0.4 and aspect < 0.6 and w <= stem_thresh:
+            stems.append(b)
+        else:
+            others.append(b)
+
+    if not dots or not stems:
+        return boxes
+
+    merged_boxes: list[tuple[int, int, int, int]] = list(others)
+    used_dots: set[int] = set()
+
+    for stem in stems:
+        sx, sy, sw, sh = stem
+        s_cx = sx + sw / 2.0
+        s_top = sy
+        best_dot_idx: Optional[int] = None
+        best_dist = float("inf")
+        for di, dot in enumerate(dots):
+            if di in used_dots:
+                continue
+            dx, dy, dw, dh = dot
+            d_cx = dx + dw / 2.0
+            d_bottom = dy + dh
+            x_overlap = abs(d_cx - s_cx)
+            if x_overlap > max(sw, dw) * 1.2:
+                continue
+            if d_bottom > s_top + median_h * 0.15:
+                continue
+            vert_dist = s_top - d_bottom
+            if vert_dist < 0 or vert_dist > median_h * 0.5:
+                continue
+            dist = x_overlap + vert_dist
+            if dist < best_dist:
+                best_dist = dist
+                best_dot_idx = di
+
+        if best_dot_idx is not None:
+            used_dots.add(best_dot_idx)
+            dot = dots[best_dot_idx]
+            dx, dy, dw, dh = dot
+            new_x = min(sx, dx)
+            new_y = min(sy, dy)
+            new_w = max(sx + sw, dx + dw) - new_x
+            new_h = max(sy + sh, dy + dh) - new_y
+            merged_boxes.append((new_x, new_y, new_w, new_h))
+        else:
+            merged_boxes.append(stem)
+
+    for di, dot in enumerate(dots):
+        if di not in used_dots:
+            merged_boxes.append(dot)
+
+    merged_boxes.sort(key=lambda b: b[0])
+    return merged_boxes
+
+
 def _segment_chars(
     bw_inv_word: np.ndarray, median_h: float
 ) -> list[tuple[int, int, int, int]]:
-    """Find character bboxes inside a single word strip via CCs."""
     if bw_inv_word.size == 0:
         return []
-    n, _, stats, _ = cv2.connectedComponentsWithStats(bw_inv_word, connectivity=8)
+
+    if median_h > 10:
+        ksize = 1
+        kern = cv2.getStructuringElement(cv2.MORPH_RECT, (ksize, ksize))
+        bw_clean = cv2.morphologyEx(bw_inv_word, cv2.MORPH_CLOSE, kern, iterations=1)
+    else:
+        bw_clean = bw_inv_word
+
+    n, _, stats, _ = cv2.connectedComponentsWithStats(bw_clean, connectivity=8)
     if n <= 1:
         return []
-    boxes: list[tuple[int, int, int, int]] = []
+
+    dot_max_h = max(4, median_h * 0.40)
+    dot_max_w = max(4, median_h * 0.35)
+
+    all_ccs: list[tuple[int, int, int, int]] = []
     for i in range(1, n):
         x = int(stats[i, cv2.CC_STAT_LEFT])
         y = int(stats[i, cv2.CC_STAT_TOP])
         w = int(stats[i, cv2.CC_STAT_WIDTH])
         h = int(stats[i, cv2.CC_STAT_HEIGHT])
         area = int(stats[i, cv2.CC_STAT_AREA])
-        if area < 4:
+        if area < 2:
             continue
-        if h < max(4, median_h * 0.25) and w < max(4, median_h * 0.25):
+        if h < 2 or w < 1:
             continue
-        boxes.append((x, y, w, h))
+        all_ccs.append((x, y, w, h))
+
+    boxes = _merge_dots_to_stems(all_ccs, median_h)
+
     if not boxes:
         return []
+
     boxes.sort(key=lambda b: b[0])
     out: list[tuple[int, int, int, int]] = []
     for b in boxes:
@@ -201,10 +341,7 @@ def _segment_chars(
     return out
 
 
-
-
 def _normalize_glyph(crop: np.ndarray) -> np.ndarray:
-    """Center a binary glyph in a fixed-size square canvas."""
     h, w = crop.shape[:2]
     if h == 0 or w == 0:
         return np.zeros((CHAR_BOX, CHAR_BOX), dtype=np.uint8)
@@ -221,7 +358,6 @@ def _normalize_glyph(crop: np.ndarray) -> np.ndarray:
 
 
 def _hog_features(glyph: np.ndarray) -> np.ndarray:
-    """Compact HOG: gradients pooled into HOG_CELL x HOG_CELL cells."""
     g = glyph.astype(np.float32) / 255.0
     gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
@@ -244,7 +380,6 @@ def _hog_features(glyph: np.ndarray) -> np.ndarray:
 
 
 def _zoning_features(glyph: np.ndarray) -> np.ndarray:
-    """Density of each cell in a coarse grid."""
     cells = ZONING_GRID
     step = CHAR_BOX // cells
     out = np.zeros(cells * cells, dtype=np.float32)
@@ -255,33 +390,83 @@ def _zoning_features(glyph: np.ndarray) -> np.ndarray:
     return out
 
 
-def _shape_features(crop: np.ndarray) -> np.ndarray:
-    """Aspect ratio + filled fraction — small but informative."""
+def _crossing_features(glyph: np.ndarray) -> np.ndarray:
+    h, w = glyph.shape[:2]
+    feats: list[float] = []
+    for pos_frac in [0.25, 0.5, 0.75]:
+        row = int(round(h * pos_frac))
+        row = min(row, h - 1)
+        transitions = 0
+        for x in range(1, w):
+            if (glyph[row, x] > 0) != (glyph[row, x - 1] > 0):
+                transitions += 1
+        feats.append(float(transitions) / max(1, w))
+
+    for pos_frac in [0.25, 0.5, 0.75]:
+        col = int(round(w * pos_frac))
+        col = min(col, w - 1)
+        transitions = 0
+        for y in range(1, h):
+            if (glyph[y, col] > 0) != (glyph[y - 1, col] > 0):
+                transitions += 1
+        feats.append(float(transitions) / max(1, h))
+
+    return np.array(feats, dtype=np.float32)
+
+
+def _hole_features(glyph: np.ndarray) -> np.ndarray:
+    inv = (glyph == 0).astype(np.uint8)
+    n, _ = cv2.connectedComponents(inv, connectivity=4)
+    holes = max(0, n - 2)
+    return np.array([min(float(holes), 3.0) / 3.0], dtype=np.float32)
+
+
+def _shape_features(crop: np.ndarray, line_h: float = 0.0) -> np.ndarray:
     h, w = crop.shape[:2]
     aspect = float(w) / max(1.0, float(h))
     fill = float((crop > 0).mean())
-    return np.array([np.tanh(np.log(aspect + 1e-6)), fill], dtype=np.float32)
+    if line_h > 0:
+        relative_h = float(h) / line_h
+    else:
+        relative_h = 0.5
+    return np.array(
+        [np.tanh(np.log(aspect + 1e-6)), fill, min(relative_h, 2.0) / 2.0],
+        dtype=np.float32,
+    )
 
 
-def char_features(glyph_uint8: np.ndarray) -> np.ndarray:
-    """Public API used by both inference and the trainer."""
+def char_features(
+    glyph_uint8: np.ndarray, line_h: float = 0.0
+) -> np.ndarray:
     norm = _normalize_glyph(glyph_uint8)
     return np.concatenate(
-        [_hog_features(norm), _zoning_features(norm), _shape_features(glyph_uint8)],
+        [
+            _hog_features(norm),
+            _zoning_features(norm),
+            _crossing_features(norm),
+            _hole_features(norm),
+            _shape_features(glyph_uint8, line_h=line_h),
+        ],
         axis=0,
     ).astype(np.float32)
 
 
-FEATURE_DIM = (CHAR_BOX // HOG_CELL) ** 2 * HOG_BIN + ZONING_GRID * ZONING_GRID + 2
+FEATURE_DIM = (
+    (CHAR_BOX // HOG_CELL) ** 2 * HOG_BIN
+    + ZONING_GRID * ZONING_GRID
+    + 6
+    + 1
+    + 3
+)
 
 
-
-
-def _predict_chars(glyphs: list[np.ndarray]) -> tuple[list[str], list[float]]:
+def _predict_chars(
+    glyphs: list[np.ndarray], line_h: float = 0.0
+) -> tuple[list[str], list[float]]:
     model, labels = _load_model()
     if model is None or labels is None or not glyphs:
         return [], []
-    X = np.stack([char_features(g) for g in glyphs], axis=0)
+    X = np.stack([char_features(g, line_h=line_h) for g in glyphs], axis=0)
     try:
         if hasattr(model, "predict_proba"):
             probs = model.predict_proba(X)
@@ -299,7 +484,6 @@ def _predict_chars(glyphs: list[np.ndarray]) -> tuple[list[str], list[float]]:
 
 
 def _bw_inverted(image: np.ndarray) -> np.ndarray:
-    """Return a uint8 inverted-binary image where ink == 255."""
     if image.ndim == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
@@ -316,11 +500,81 @@ def _bw_inverted(image: np.ndarray) -> np.ndarray:
     )
 
 
+def _clean_bw(bw_inv: np.ndarray, median_h: float) -> np.ndarray:
+    if bw_inv.size == 0 or median_h <= 0:
+        return bw_inv
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(bw_inv, connectivity=8)
+    if n <= 1:
+        return bw_inv
+    min_area = max(3, int(median_h * 0.15))
+    keep = np.ones(n, dtype=bool)
+    for i in range(1, n):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        h = int(stats[i, cv2.CC_STAT_HEIGHT])
+        w = int(stats[i, cv2.CC_STAT_WIDTH])
+        if area < min_area and h < max(3, median_h * 0.15) and w < max(3, median_h * 0.15):
+            keep[i] = False
+    mask = keep[labels]
+    return np.where(mask, bw_inv, 0).astype(np.uint8)
+
+
+def _estimate_median_cc_height(bw_inv: np.ndarray) -> float:
+    if bw_inv.size == 0:
+        return 0.0
+    n, _, stats, _ = cv2.connectedComponentsWithStats(bw_inv, connectivity=8)
+    if n <= 1:
+        return 0.0
+    heights = []
+    for i in range(1, n):
+        h = int(stats[i, cv2.CC_STAT_HEIGHT])
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        if area >= 4 and h >= 4:
+            heights.append(h)
+    if not heights:
+        return 0.0
+    return float(np.median(heights))
+
+
+def _case_correct_word(text: str, confs: list[float], line_h: Optional[float] = None) -> str:
+    if not text or not confs:
+        return text
+    chars = list(text)
+    n_upper = sum(1 for c in chars if c.isupper())
+    n_lower = sum(1 for c in chars if c.islower())
+    n_alpha = n_upper + n_lower
+    if n_alpha == 0:
+        return text
+
+    upper_ratio = n_upper / n_alpha
+    low_conf_thresh = 50.0
+
+    if upper_ratio > 0.6 and len(chars) > 2:
+        new_chars = []
+        for i, c in enumerate(chars):
+            if c.isupper() and i > 0 and confs[i] < low_conf_thresh:
+                new_chars.append(c.lower())
+            else:
+                new_chars.append(c)
+        return "".join(new_chars)
+
+    for i, c in enumerate(chars):
+        if c.islower() and i == 0 and len(chars) > 1 and confs[i] < low_conf_thresh:
+            if chars[1].islower() or not chars[1].isalpha():
+                pass
+
+    return text
+
+
 def _ocr_image(image: np.ndarray) -> tuple[str, float, list[Word]]:
     bw_inv = _bw_inverted(image)
     line_bands = _segment_lines(bw_inv)
     if not line_bands:
         return "", 0.0, []
+
+    median_cc_h = _estimate_median_cc_height(bw_inv)
+    if median_cc_h > 0:
+        bw_inv = _clean_bw(bw_inv, median_cc_h)
+
     lines_out: list[str] = []
     words_out: list[Word] = []
     confs: list[float] = []
@@ -344,12 +598,13 @@ def _ocr_image(image: np.ndarray) -> tuple[str, float, list[Word]]:
                 gx0 = max(0, cx - pad)
                 gx1 = min(word_strip.shape[1], cx + cw + pad)
                 glyphs.append(word_strip[gy0:gy1, gx0:gx1])
-            chars, char_confs = _predict_chars(glyphs)
+            chars, char_confs = _predict_chars(glyphs, line_h=float(line_h))
             if not chars:
                 continue
             text = "".join(chars).strip()
             if not text:
                 continue
+            text = _case_correct_word(text, char_confs, line_h=float(line_h))
             confs.extend(char_confs)
             line_words.append(text)
             mean_word_conf = float(np.mean(char_confs)) if char_confs else 0.0
@@ -370,14 +625,11 @@ def _ocr_image(image: np.ndarray) -> tuple[str, float, list[Word]]:
     return text, mean_conf, words_out
 
 
-
-
 def run_printed(
     images: dict[str, np.ndarray],
     lang: str = "eng",
     spell_check: bool = False,
 ) -> tuple[OcrPass, list[OcrPass]]:
-    """Mirror of `ocr.run_printed`. Reuses the binary input."""
     bin_img = images.get("binary")
     if bin_img is None:
         bin_img = enhancer.binarized_path(images.get("raw", np.zeros((1, 1, 3), np.uint8)))
@@ -398,29 +650,7 @@ def run_printed(
     return best, [best]
 
 
-def run_handwriting(
-    images: dict[str, np.ndarray],
-    spell_check: bool = False,
-) -> tuple[OcrPass, list[OcrPass]]:
-    """Handwriting is unsupported by the from-scratch engine.
-
-    The pipeline is responsible for falling back to pytesseract; we still
-    return a valid (empty) OcrPass so downstream code does not crash if it
-    is ever called directly.
-    """
-    empty = OcrPass(
-        psm=0,
-        lang="eng",
-        image_kind="from_scratch_unsupported",
-        text="",
-        mean_conf=0.0,
-        words=[],
-    )
-    return empty, [empty]
-
-
 def _maybe_spell_correct(text: str, words: list[Word]) -> str:
-    """Best-effort spell correction; identical contract to ocr._spell_correct."""
     try:
         from importlib.resources import files as resource_files
 

@@ -20,41 +20,6 @@ DEFAULT_LANG = os.getenv("OCR_LANG", "eng")
 
 _log = logging.getLogger(__name__)
 
-def _list_installed_langs() -> set[str]:
-    cmd = pytesseract.pytesseract.tesseract_cmd or "tesseract"
-    try:
-        import subprocess
-
-        out = subprocess.run(
-            [cmd, "--list-langs"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return set()
-    langs: set[str] = set()
-    for line in out.stdout.splitlines():
-        s = line.strip()
-        if not s or " " in s or s.lower().startswith("list of"):
-            continue
-        langs.add(s)
-    return langs
-
-_AVAILABLE_LANGS = _list_installed_langs()
-
-_HANDWRITING_AUX_LANG: str | None = None
-for _cand in ("eng_handwriting", "Latin", "script/Latin"):
-    if _cand in _AVAILABLE_LANGS:
-        _HANDWRITING_AUX_LANG = _cand
-        break
-
-_HAS_HANDWRITING_MODEL = _HANDWRITING_AUX_LANG is not None
-if not _HAS_HANDWRITING_MODEL:
-    _log.warning("no handwriting/Latin script model found; handwriting branch will use eng only")
-else:
-    _log.info("handwriting branch will also try lang=%s", _HANDWRITING_AUX_LANG)
-
 @dataclass
 class Word:
     text: str
@@ -133,47 +98,6 @@ def _reflow(words: list[Word]) -> str:
         paragraphs.append(current)
     return "\n\n".join("\n".join(p) for p in paragraphs)
 
-def _bbox_iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
-    ax, ay, aw, ah = a
-    bx, by, bw, bh = b
-    ix0, iy0 = max(ax, bx), max(ay, by)
-    ix1, iy1 = min(ax + aw, bx + bw), min(ay + ah, by + bh)
-    if ix1 <= ix0 or iy1 <= iy0:
-        return 0.0
-    inter = (ix1 - ix0) * (iy1 - iy0)
-    union = aw * ah + bw * bh - inter
-    return inter / max(1, union)
-
-def _merge_passes(passes: list[OcrPass]) -> OcrPass:
-    if not passes:
-        return OcrPass(psm=0, lang="", image_kind="", text="", mean_conf=0.0)
-    base = max(passes, key=lambda p: (p.mean_conf, len(p.words)))
-    merged_words: list[Word] = list(base.words)
-    for p in passes:
-        if p is base:
-            continue
-        for w in p.words:
-            overlapping = False
-            for existing in merged_words:
-                if _bbox_iou(w.bbox, existing.bbox) > 0.4:
-                    overlapping = True
-                    if w.conf > existing.conf:
-                        merged_words[merged_words.index(existing)] = w
-                    break
-            if not overlapping:
-                merged_words.append(w)
-    text = _reflow(merged_words)
-    confs = [w.conf for w in merged_words if w.conf > 0]
-    mean = float(np.mean(confs)) if confs else 0.0
-    return OcrPass(
-        psm=base.psm,
-        lang=base.lang,
-        image_kind="merged",
-        text=text,
-        mean_conf=mean,
-        words=merged_words,
-    )
-
 def _spell_correct(text: str, words: list[Word]) -> str:
     try:
         from symspellpy import SymSpell, Verbosity
@@ -235,31 +159,3 @@ def run_printed(
     if spell_check and best.text:
         best.text = _spell_correct(best.text, best.words)
     return best, alternatives
-
-def run_handwriting(
-    images: dict[str, np.ndarray],
-    spell_check: bool = False,
-) -> tuple[OcrPass, list[OcrPass]]:
-    img = images["handwriting_gray"]
-    alternatives: list[OcrPass] = []
-    runs: list[OcrPass] = []
-    for psm in (6, 7, 11):
-        p = _run_tesseract(img, psm=psm, lang="eng", image_kind="handwriting_gray")
-        alternatives.append(p)
-        runs.append(p)
-    if _HAS_HANDWRITING_MODEL and _HANDWRITING_AUX_LANG:
-        ph = _run_tesseract(img, psm=6, lang=_HANDWRITING_AUX_LANG, image_kind="handwriting_gray")
-        alternatives.append(ph)
-        runs.append(ph)
-    merged = _merge_passes(runs)
-    if (not merged.words) and "raw" in images:
-        praw = _run_tesseract(images["raw"], psm=6, lang="eng", image_kind="raw")
-        alternatives.append(praw)
-        if praw.words:
-            merged = praw
-    if spell_check and merged.text:
-        merged.text = _spell_correct(merged.text, merged.words)
-    return merged, alternatives
-
-def has_handwriting_model() -> bool:
-    return _HAS_HANDWRITING_MODEL

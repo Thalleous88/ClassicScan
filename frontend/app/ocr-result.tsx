@@ -28,7 +28,7 @@ import {
   reprocessScan,
   useScanStore,
 } from '@/lib/store';
-import type { OcrEngine, PipelinePath, ScanRecord } from '@/lib/types';
+import type { OcrEngine, ScanRecord } from '@/lib/types';
 
 export default function OCRResultScreen() {
   const insets = useSafeAreaInsets();
@@ -40,7 +40,6 @@ export default function OCRResultScreen() {
   const [savingPdf, setSavingPdf] = useState(false);
   const [savingDocx, setSavingDocx] = useState(false);
   const [savingText, setSavingText] = useState(false);
-  const [reprocessing, setReprocessing] = useState<PipelinePath | null>(null);
   const [switchingEngine, setSwitchingEngine] = useState<OcrEngine | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +110,7 @@ export default function OCRResultScreen() {
     setSavingPdf(true);
     const res = await attachPdf(scan.id, {
       enhanceMode: scan.enhance_mode,
-      searchable: scan.pipeline_path === 'printed' && scan.mean_conf >= 60,
+      searchable: scan.mean_conf >= 60,
     });
     if (!res.ok) {
       setError(res.error.message);
@@ -172,16 +171,16 @@ export default function OCRResultScreen() {
     }
   };
 
-  const handleReprocess = async (target: PipelinePath) => {
-    if (!scan || reprocessing) return;
-    if (target === scan.pipeline_path) return;
+  const handleSwitchEngine = async (target: OcrEngine) => {
+    if (!scan || switchingEngine) return;
+    if (target === scan.ocr_engine) return;
     setError(null);
-    setReprocessing(target);
-    const res = await reprocessScan(scan.id, target, {
+    setSwitchingEngine(target);
+    const res = await reprocessScan(scan.id, {
       enhanceMode: scan.enhance_mode,
-      ocrEngine: scan.ocr_engine,
+      ocrEngine: target,
     });
-    setReprocessing(null);
+    setSwitchingEngine(null);
     if (!res.ok) {
       setError(res.error.message);
       return;
@@ -195,25 +194,6 @@ export default function OCRResultScreen() {
     if (kind) {
       const r = await fetchAssetToCache(res.data.id, kind);
       if (r.ok) setImageUri(r.data.uri);
-    }
-  };
-
-  const handleSwitchEngine = async (target: OcrEngine) => {
-    if (!scan || switchingEngine) return;
-    if (target === scan.ocr_engine) return;
-    setError(null);
-    setSwitchingEngine(target);
-    const res = await reprocessScan(
-      scan.id,
-      scan.pipeline_path === 'handwriting' ? 'handwriting' : 'printed',
-      {
-        enhanceMode: scan.enhance_mode,
-        ocrEngine: target,
-      },
-    );
-    setSwitchingEngine(null);
-    if (!res.ok) {
-      setError(res.error.message);
     }
   };
 
@@ -440,16 +420,17 @@ export default function OCRResultScreen() {
               paddingHorizontal: 14,
             }}
           >
-            <Eyebrow>Pipeline</Eyebrow>
+            <Eyebrow>OCR engine</Eyebrow>
             <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
-              {(['printed', 'handwriting'] as PipelinePath[]).map((p) => {
-                const active = scan.pipeline_path === p;
-                const busy = reprocessing === p;
+              {(['from_scratch', 'pytesseract'] as OcrEngine[]).map((e) => {
+                const active = scan.ocr_engine === e;
+                const busy = switchingEngine === e;
+                const label = e === 'from_scratch' ? 'From Scratch' : 'PyTesseract';
                 return (
                   <TouchableOpacity
-                    key={p}
-                    onPress={() => handleReprocess(p)}
-                    disabled={active || !!reprocessing}
+                    key={e}
+                    onPress={() => handleSwitchEngine(e)}
+                    disabled={active || !!switchingEngine}
                     activeOpacity={0.85}
                     style={{
                       flex: 1,
@@ -460,7 +441,7 @@ export default function OCRResultScreen() {
                       borderColor: active ? Tokens.accent : Tokens.hairline,
                       alignItems: 'center',
                       justifyContent: 'center',
-                      opacity: !active && reprocessing && !busy ? 0.4 : 1,
+                      opacity: !active && switchingEngine && !busy ? 0.4 : 1,
                     }}
                   >
                     {busy ? (
@@ -475,7 +456,7 @@ export default function OCRResultScreen() {
                           textTransform: 'uppercase',
                         }}
                       >
-                        {p === 'printed' ? 'Printed' : 'Hand'}
+                        {label}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -508,63 +489,6 @@ export default function OCRResultScreen() {
               </Text>
             </View>
           ) : null}
-        </View>
-
-        {}
-        <View
-          style={{
-            backgroundColor: Tokens.surface,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderColor: Tokens.hairline,
-            paddingVertical: 12,
-            paddingHorizontal: 14,
-            marginBottom: 14,
-          }}
-        >
-          <Eyebrow>OCR engine</Eyebrow>
-          <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
-            {(['from_scratch', 'pytesseract'] as OcrEngine[]).map((e) => {
-              const active = scan.ocr_engine === e;
-              const busy = switchingEngine === e;
-              const label = e === 'from_scratch' ? 'From Scratch' : 'PyTesseract';
-              return (
-                <TouchableOpacity
-                  key={e}
-                  onPress={() => handleSwitchEngine(e)}
-                  disabled={active || !!switchingEngine}
-                  activeOpacity={0.85}
-                  style={{
-                    flex: 1,
-                    height: 28,
-                    borderRadius: 999,
-                    backgroundColor: active ? Tokens.accent : 'transparent',
-                    borderWidth: 1,
-                    borderColor: active ? Tokens.accent : Tokens.hairline,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    opacity: !active && switchingEngine && !busy ? 0.4 : 1,
-                  }}
-                >
-                  {busy ? (
-                    <ActivityIndicator size="small" color={Tokens.ink} />
-                  ) : (
-                    <Text
-                      style={{
-                        color: active ? Tokens.accentInk : Tokens.inkMuted,
-                        fontFamily: 'PlusJakartaSans_700Bold',
-                        fontSize: 10,
-                        letterSpacing: 0.8,
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      {label}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
         </View>
 
         {}

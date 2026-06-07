@@ -27,15 +27,14 @@ def _pick_image() -> Path | None:
 def test_pipeline_result_records_engine_used():
     img = _pick_image()
     assert img is not None
-    result = ml_pipeline.run_from_array.__wrapped__ if hasattr(
-        ml_pipeline.run_from_array, "__wrapped__"
-    ) else None
     out = ml_pipeline.run_from_path(str(img), return_enhanced=True)
     assert type(out.ocr_engine_used) is str
     assert out.ocr_engine_used in ("pytesseract", "from_scratch")
 
 
 def test_from_scratch_engine_runs_when_model_present():
+    """Smoke test: render a synthetic page and OCR it with the from-scratch
+    engine. If the model isn't trained yet, skip (CI may not have run training)."""
     if not ocr_from_scratch.has_model():
         pytest.skip("from_scratch model not trained in this environment")
     import cv2
@@ -57,22 +56,21 @@ def test_from_scratch_engine_runs_when_model_present():
         bgr,
         return_enhanced=False,
         ocr_engine="from_scratch",
-        mode="printed",
     )
     assert result.ocr_engine_used == "from_scratch"
     assert isinstance(result.text, str)
 
 
-def test_pipeline_falls_back_to_pytesseract_for_handwriting():
-    if not ocr_from_scratch.has_model():
-        pytest.skip("from_scratch model not trained in this environment")
+def test_from_scratch_falls_back_when_model_missing(monkeypatch):
+    """When the from-scratch model artifact is absent, the pipeline must
+    transparently fall back to PyTesseract and record that fact."""
     img = _pick_image()
     if img is None:
         pytest.skip("no dev image available")
+    monkeypatch.setattr(ocr_from_scratch, "has_model", lambda: False)
     result = ml_pipeline.run_from_path(
         str(img),
         return_enhanced=False,
         ocr_engine="from_scratch",
-        mode="handwriting",
     )
     assert result.ocr_engine_used == "pytesseract"

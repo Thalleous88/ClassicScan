@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from . import _textstats, rules
+from . import _textstats
 
 try:
     from skimage.filters import threshold_sauvola
@@ -62,17 +62,3 @@ def binarized_path(image_bgr: np.ndarray) -> np.ndarray:
         cleaned = np.where(mask, inv, 0).astype(np.uint8)
         bw = cv2.bitwise_not(cleaned)
     return bw
-
-def handwriting_path(image_bgr: np.ndarray) -> np.ndarray:
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    cleaned = rules.remove_horizontal_rules(gray)
-    clahe = cv2.createCLAHE(clipLimit=0.8, tileGridSize=(8, 8))
-    enhanced = clahe.apply(cleaned)
-    den = cv2.bilateralFilter(enhanced, d=5, sigmaColor=40, sigmaSpace=40)
-    lo = float(np.percentile(den, 5))
-    hi = float(np.percentile(den, 95))
-    if hi - lo > 1:
-        stretched = np.clip((den.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(np.uint8)
-    else:
-        stretched = den
-    return stretched

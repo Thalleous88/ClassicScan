@@ -38,16 +38,12 @@ class Scan(Base):
     original_filename = Column(String(255), nullable=True)
     bytes_size = Column(Integer, nullable=False, default=0)
 
-    mode = Column(String(32), nullable=False, default="auto")
     enhance_mode = Column(String(32), nullable=False, default="color")
-    pipeline_path = Column(String(32), nullable=False, default="printed")
     ocr_engine = Column(String(32), nullable=False, default="pytesseract")
 
     mean_conf = Column(Float, nullable=False, default=0.0)
     document_detected = Column(Boolean, nullable=False, default=False)
     detection_score = Column(Float, nullable=False, default=0.0)
-    handwriting_detected = Column(Boolean, nullable=False, default=False)
-    handwriting_confidence = Column(Float, nullable=False, default=0.0)
     confidence_warning = Column(String(512), nullable=True)
     psm_used = Column(Integer, nullable=False, default=0)
     language = Column(String(32), nullable=False, default="eng")
