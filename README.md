@@ -511,7 +511,3 @@ meta.json               detection scores, OCR alternatives, engine used
    but with many errors, this is expected — the classical CV pipeline
    has no language model and struggles with noise, touching characters,
    and case disambiguation. Use PyTesseract for higher accuracy.
-
-## License
-
-Private project. Do not redistribute.
