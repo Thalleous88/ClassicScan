@@ -208,19 +208,36 @@ shows on screen. Stages:
    - Classifier: `RandomForestClassifier(n_estimators=200,
      class_weight="balanced_subsample")`.
 
-   **Engine comparison** (synthetic test, clean printed text):
+   **Engine comparison** — evaluated with `ml/eval/evaluate.py` against
+   human-transcribed ground truth (`.gt.txt` files beside each test image).
+   Test images: `test.jpg` (Chapter I of Alice's Adventures in Wonderland,
+   clean printed book page, 1789×2363 px) and `test2.jpg` (Introduction
+   of Raggedy Ann Stories, clean printed book page, 1752×2646 px).
+   Confidence is `mean_conf` from the pipeline (Tesseract per-word
+   confidence avg, or from-scratch `argmax(predict_proba)×100` avg across
+   characters). CER = `Levenshtein.distance(ref, hyp) / len(ref)`.
+   WER = same at word level.
 
-   | Metric        | PyTesseract | From-scratch |
-   |---------------|-------------|--------------|
-   | Confidence    | 94.2        | 54.2         |
-   | CER           | 0.023       | 0.465        |
-   | WER           | 0.004       | 0.465        |
+   | Metric         | PyTesseract | From-scratch |
+   |----------------|-------------|--------------|
+   | Avg confidence | 94.95       | 47.28        |
+   | Avg CER        | 0.006       | 0.587        |
+   | Avg WER        | 0.006       | 0.587        |
+
+   Per-image:
+
+   | Image     | Engine       | Conf  | CER   | WER   |
+   |-----------|--------------|-------|-------|-------|
+   | test.jpg  | pytesseract  | 95.30 | 0.003 | 0.003 |
+   | test.jpg  | from_scratch | 59.39 | 0.425 | 0.423 |
+   | test2.jpg | pytesseract  | 94.59 | 0.009 | 0.009 |
+   | test2.jpg | from_scratch | 35.18 | 0.750 | 0.752 |
 
    PyTesseract benefits from a language model and LSTM-based recognition.
-   The from-scratch engine uses only classical CV features and a
-   RandomForest — no language model, no sequence decoding. It produces
-   legible text on clean printed pages but struggles with noise, touching
-   characters, and case disambiguation.
+   The from-scratch engine classifies each character independently — no
+   sequence model, no dictionary — so ambiguous glyphs are decided on
+   shape alone. This hurts most on real scanned pages where binarization
+   artifacts break strokes and blur character boundaries.
 7. **User-visible enhancement** — `scanner_enhance.enhance(warped, mode)`
    produces the final image the user sees. Modes:
    - `color` — shadow-removed white-balanced image.
