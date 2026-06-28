@@ -63,6 +63,8 @@ backend/
     _textstats.py           text-height + connected-component utilities
     rules.py                horizontal-rule removal helper (used by detector)
     eval/                   offline evaluation harness
+    eval/benchmark.py       latency + accuracy benchmark script
+  Dockerfile                Docker image for production deployment
   storage/           runtime data: <user_id>/<scan_id>/{raw,enhanced,pdf,docx}
   tests/             pytest suite (pipeline shape + EXIF + engine round-trip)
 
@@ -79,7 +81,7 @@ frontend/
       history.tsx      full scan history with search
     camera-scan.tsx    camera with static A4 framing bracket
     adjust-corners.tsx manual quad confirmation (every scan goes through this)
-    scan-preview.tsx   live enhancement preview, mode + engine picker
+    scan-preview.tsx   live enhancement preview, mode picker
     processing.tsx     blocking progress while /scan/extract runs
     ocr-result.tsx     final scan view: text, image, share/save
   components/          shared UI primitives (Button, Card, Eyebrow, etc.)
@@ -111,13 +113,13 @@ frontend/
    resulting quad as a `quad_override` route param. There is no auto bypass.
 
 4. **Scan preview** (`scan-preview.tsx`).
-   The screen calls `POST /scan/preview` with the image, the current
-   `enhance_mode`, and the `quad_override` from step 3. The backend skips
-   its own detector and warps using the user-supplied corners, then runs
-   the rest of the ML pipeline (resize, orient/deskew, enhance) but
-   **skips OCR**, returning just the enhanced image bytes. The user picks
-   one of Color / Gray / B&W / Magic, and an OCR engine (From Scratch or
-   PyTesseract) for the next step.
+    The screen calls `POST /scan/preview` with the image, the current
+    `enhance_mode`, and the `quad_override` from step 3. The backend skips
+    its own detector and warps using the user-supplied corners, then runs
+    the rest of the ML pipeline (resize, orient/deskew, enhance) but
+    **skips OCR**, returning just the enhanced image bytes. The user picks
+    one of Color / Gray / B&W / Magic. The OCR engine defaults to
+    "From Scratch" and can be changed later on the result screen.
 
 5. **Tap "Extract & save"** → `processing.tsx`.
    Same image is uploaded once more, this time to `POST /scan/extract`,
@@ -218,20 +220,22 @@ shows on screen. Stages:
    characters). CER = `Levenshtein.distance(ref, hyp) / len(ref)`.
    WER = same at word level.
 
-   | Metric         | PyTesseract | From-scratch |
-   |----------------|-------------|--------------|
-   | Avg confidence | 94.95       | 47.28        |
-   | Avg CER        | 0.006       | 0.587        |
-   | Avg WER        | 0.006       | 0.587        |
+   | Metric           | PyTesseract | From-scratch |
+   |------------------|-------------|--------------|
+   | Avg confidence   | 94.95       | 47.28        |
+   | Avg CER          | 0.006       | 0.587        |
+   | Avg WER          | 0.006       | 0.587        |
+   | Avg OCR time (ms)| 7204        | 29750        |
+   | Avg total (ms)   | 11891       | 34619        |
 
    Per-image:
 
-   | Image     | Engine       | Conf  | CER   | WER   |
-   |-----------|--------------|-------|-------|-------|
-   | test.jpg  | pytesseract  | 95.30 | 0.003 | 0.003 |
-   | test.jpg  | from_scratch | 59.39 | 0.425 | 0.423 |
-   | test2.jpg | pytesseract  | 94.59 | 0.009 | 0.009 |
-   | test2.jpg | from_scratch | 35.18 | 0.750 | 0.752 |
+   | Image     | Engine       | Total (ms) | OCR (ms) | Conf  | CER   | WER   |
+   |-----------|--------------|------------|----------|-------|-------|-------|
+   | test.jpg  | pytesseract  | 10405±224  | 6870±129 | 95.30 | 0.003 | 0.003 |
+   | test.jpg  | from_scratch | 33984±711  | 30306±776| 59.39 | 0.425 | 0.423 |
+   | test2.jpg | pytesseract  | 13377±120  | 7538±73  | 94.59 | 0.009 | 0.009 |
+   | test2.jpg | from_scratch | 35253±320  | 29193±116| 35.18 | 0.750 | 0.752 |
 
    PyTesseract benefits from a language model and LSTM-based recognition.
    The from-scratch engine classifies each character independently — no
@@ -248,8 +252,10 @@ shows on screen. Stages:
    bytes plus mime.
 
 `PipelineResult` carries everything: text, words, confidence, mean_conf,
-psm_used, ocr_engine_used, and the encoded enhanced bytes. The router
-copies the parts it needs onto the `Scan` row and writes the bytes to disk.
+psm_used, ocr_engine_used, encoded enhanced bytes, and a `timing_ms` dict
+with per-stage wall-clock times (detect_warp, orient_deskew_dpi,
+ocr_enhance, ocr, total). The router copies the parts it needs onto the
+`Scan` row and writes the bytes to disk.
 
 ## API surface
 
@@ -318,6 +324,7 @@ Two tables, both created automatically at startup via
 - `mean_conf`, `psm_used`, `document_detected`, `detection_score`,
   `confidence_warning`.
 - `text` (full OCR output).
+- `quad` (JSON `[[x,y], …]` four corner points used for the perspective warp; preserved across reprocess).
 - `raw_path`, `enhanced_path`, `enhanced_mime`, `pdf_path`, `docx_path`.
 
 There are no migrations; alembic is listed in `requirements.txt` but
@@ -462,6 +469,21 @@ cd frontend
 npx tsc --noEmit
 ```
 
+### Benchmarking
+
+Run per-stage latency and accuracy benchmarks on the test images:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m ml.eval.benchmark
+```
+
+Results are written to stdout. See `ml/eval/BENCHMARK.md` for the latest
+baseline. The benchmark script collects wall-clock times from
+`PipelineResult.timing_ms` at 5 checkpoints (detect_warp,
+orient_deskew_dpi, ocr_enhance, ocr, total) plus confidence, CER, and WER.
+
 ### Debugging the ML pipeline
 
 Set `OCR_DEBUG=1` in the backend environment and hit `/scan/preview` or
@@ -480,6 +502,57 @@ Set `OCR_DEBUG=1` in the backend environment and hit `/scan/preview` or
 10_enhanced_<mode>.jpg  user-visible enhancer output
 meta.json               detection scores, OCR alternatives, engine used
 ```
+
+## Deployment (Docker)
+
+The backend ships with a `Dockerfile` and a `docker-compose.yml` at the repo
+root for production deployment.
+
+### Dockerfile (`backend/Dockerfile`)
+
+- Base: `python:3.11-slim`.
+- Installs Tesseract OCR (English), OpenCV system deps (`libgl1`, etc.).
+- Multi-stage not required — image is ~1.2 GB compressed.
+- Exposes port 23000.
+
+### docker-compose.yml
+
+```yaml
+services:
+  classicscan:
+    build: ./backend
+    ports:
+      - "23000:23000"
+    env_file: ./backend/.env
+    volumes:
+      - classicscan_storage:/app/storage
+    restart: unless-stopped
+```
+
+### Production steps
+
+1. Copy and configure environment:
+   ```bash
+   cp backend/.env.example backend/.env
+   # Edit: DATABASE_URL (use managed Postgres like Neon/Supabase),
+   #       SECRET_KEY (generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`),
+   #       CORS_ORIGINS (your frontend domain)
+   ```
+
+2. Build and start:
+   ```bash
+   docker compose up -d --build
+   docker compose logs -f   # verify health
+   ```
+
+3. The from-scratch model is baked into the image (`ml/models/`). To
+   retrain on the server:
+   ```bash
+   docker compose exec classicscan python -m ml.train_from_scratch
+   ```
+
+No PostgreSQL container is included — the backend uses an **external**
+managed database (Neon, Supabase, etc.) specified via `DATABASE_URL`.
 
 ## Troubleshooting
 
