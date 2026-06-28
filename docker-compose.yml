@@ -1,0 +1,12 @@
+services:
+  classicscan:
+    build: ./backend
+    ports:
+      - "23000:23000"
+    env_file: ./backend/.env
+    volumes:
+      - classicscan_storage:/app/storage
+    restart: unless-stopped
+
+volumes:
+  classicscan_storage:
