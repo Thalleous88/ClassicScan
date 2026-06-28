@@ -50,6 +50,8 @@ class Scan(Base):
 
     text = Column(Text, nullable=False, default="")
 
+    quad = Column(Text, nullable=True)
+
     raw_path = Column(String(1024), nullable=True)
     enhanced_path = Column(String(1024), nullable=True)
     enhanced_mime = Column(String(64), nullable=True)

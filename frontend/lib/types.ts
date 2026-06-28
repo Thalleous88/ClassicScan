@@ -37,6 +37,7 @@ export type ScanRecord = {
   psm_used: number;
   text: string;
   enhanced_mime: string | null;
+  quad: Quad | null;
   assets: ScanAssets;
 };
 

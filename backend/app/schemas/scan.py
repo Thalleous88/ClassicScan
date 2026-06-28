@@ -48,6 +48,8 @@ class ScanOut(BaseModel):
     text: str
     enhanced_mime: Optional[str]
 
+    quad: Optional[list[list[float]]] = None
+
     assets: ScanAssets
 
     model_config = ConfigDict(from_attributes=True)

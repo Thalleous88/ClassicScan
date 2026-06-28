@@ -109,6 +109,12 @@ def _asset_url(scan_id: str, kind: str) -> str:
     return f"/scan/{scan_id}/asset/{kind}"
 
 def _to_scan_out(scan: ScanModel) -> ScanOut:
+    quad_data: Optional[list[list[float]]] = None
+    if scan.quad:
+        try:
+            quad_data = json.loads(scan.quad)
+        except Exception:
+            quad_data = None
     return ScanOut(
         id=scan.id,
         name=scan.name,
@@ -125,6 +131,7 @@ def _to_scan_out(scan: ScanModel) -> ScanOut:
         psm_used=scan.psm_used,
         text=scan.text,
         enhanced_mime=scan.enhanced_mime,
+        quad=quad_data,
         assets=ScanAssets(
             raw=_asset_url(scan.id, "raw") if scan.raw_path else None,
             enhanced=_asset_url(scan.id, "enhanced") if scan.enhanced_path else None,
@@ -214,6 +221,7 @@ async def extract(
         language=result.language,
         text=result.text,
         enhanced_mime=result.enhanced_mime if result.enhanced_bytes else None,
+        quad=json.dumps(result.quad_used) if result.quad_used else None,
     )
     db.add(scan)
     try:
@@ -358,6 +366,16 @@ async def reprocess(
     except PermissionError:
         raise HTTPException(status_code=403, detail="forbidden")
 
+    quad_arr: Optional[np.ndarray] = None
+    if scan.quad:
+        try:
+            import numpy as np
+            quad_arr = np.asarray(json.loads(scan.quad), dtype=np.float32)
+            if quad_arr.shape != (4, 2):
+                quad_arr = None
+        except Exception:
+            quad_arr = None
+
     try:
         result = await run_in_threadpool(
             pipeline.run_from_bytes,
@@ -370,7 +388,7 @@ async def reprocess(
             True,
             False,
             ocr_engine,
-            None,
+            quad_arr,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -404,6 +422,8 @@ async def reprocess(
     scan.psm_used = result.psm_used
     scan.language = result.language
     scan.text = result.text
+    if result.quad_used:
+        scan.quad = json.dumps(result.quad_used)
 
     db.commit()
     db.refresh(scan)

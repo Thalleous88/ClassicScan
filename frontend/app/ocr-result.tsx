@@ -401,94 +401,87 @@ export default function OCRResultScreen() {
           </View>
         ) : null}
 
-        {}
         <View
           style={{
-            flexDirection: 'row',
-            gap: 12,
+            backgroundColor: Tokens.surface,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: Tokens.hairline,
+            paddingVertical: 12,
+            paddingHorizontal: 14,
             marginBottom: 14,
           }}
         >
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: Tokens.surface,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: Tokens.hairline,
-              paddingVertical: 12,
-              paddingHorizontal: 14,
-            }}
-          >
-            <Eyebrow>OCR engine</Eyebrow>
-            <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
-              {(['from_scratch', 'pytesseract'] as OcrEngine[]).map((e) => {
-                const active = scan.ocr_engine === e;
-                const busy = switchingEngine === e;
-                const label = e === 'from_scratch' ? 'From Scratch' : 'PyTesseract';
-                return (
-                  <TouchableOpacity
-                    key={e}
-                    onPress={() => handleSwitchEngine(e)}
-                    disabled={active || !!switchingEngine}
-                    activeOpacity={0.85}
-                    style={{
-                      flex: 1,
-                      height: 28,
-                      borderRadius: 999,
-                      backgroundColor: active ? Tokens.accent : 'transparent',
-                      borderWidth: 1,
-                      borderColor: active ? Tokens.accent : Tokens.hairline,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: !active && switchingEngine && !busy ? 0.4 : 1,
-                    }}
-                  >
-                    {busy ? (
-                      <ActivityIndicator size="small" color={Tokens.ink} />
-                    ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Eyebrow>OCR Engine</Eyebrow>
+            {scan.mean_conf > 0 ? (
+              <Text
+                style={{
+                  color: Tokens.inkMuted,
+                  fontFamily: 'PlusJakartaSans_500Medium',
+                  fontSize: 11,
+                  letterSpacing: 0.4,
+                }}
+              >
+                {scan.mean_conf.toFixed(0)}% confidence
+              </Text>
+            ) : null}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+            {(['from_scratch', 'pytesseract'] as OcrEngine[]).map((e) => {
+              const active = scan.ocr_engine === e;
+              const busy = switchingEngine === e;
+              const label = e === 'from_scratch' ? 'From Scratch' : 'PyTesseract';
+              const sub = e === 'from_scratch' ? 'Fast' : 'Thorough';
+              return (
+                <TouchableOpacity
+                  key={e}
+                  onPress={() => handleSwitchEngine(e)}
+                  disabled={active || !!switchingEngine}
+                  activeOpacity={0.85}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: active ? Tokens.accent : Tokens.surface,
+                    borderWidth: 1,
+                    borderColor: active ? Tokens.accent : Tokens.hairline,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: !active && switchingEngine && !busy ? 0.4 : 1,
+                  }}
+                >
+                  {busy ? (
+                    <ActivityIndicator size="small" color={Tokens.ink} />
+                  ) : (
+                    <>
                       <Text
                         style={{
-                          color: active ? Tokens.accentInk : Tokens.inkMuted,
+                          color: active ? Tokens.accentInk : Tokens.ink,
                           fontFamily: 'PlusJakartaSans_700Bold',
-                          fontSize: 10,
-                          letterSpacing: 0.8,
-                          textTransform: 'uppercase',
+                          fontSize: 11,
+                          letterSpacing: 0.6,
                         }}
                       >
                         {label}
                       </Text>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+                      <Text
+                        style={{
+                          color: active ? Tokens.accentInk : Tokens.inkFaint,
+                          fontFamily: 'PlusJakartaSans_500Medium',
+                          fontSize: 9,
+                          marginTop: 2,
+                          letterSpacing: 0.4,
+                        }}
+                      >
+                        {sub.toUpperCase()}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
-          {scan.mean_conf > 0 ? (
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: Tokens.surface,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: Tokens.hairline,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-              }}
-            >
-              <Eyebrow>Confidence</Eyebrow>
-              <Text
-                style={{
-                  color: Tokens.ink,
-                  fontFamily: 'PlusJakartaSans_700Bold',
-                  fontSize: 14,
-                  marginTop: 4,
-                }}
-              >
-                {scan.mean_conf.toFixed(0)}%
-              </Text>
-            </View>
-          ) : null}
         </View>
 
         {}
