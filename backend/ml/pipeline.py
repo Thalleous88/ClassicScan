@@ -60,6 +60,8 @@ class PipelineResult:
     ocr_engine_used: str = "pytesseract"
     crop_jpg: Optional[bytes] = None
     enhanced_bytes: Optional[bytes] = None
+    quad_used: Optional[list[list[float]]] = None
+    timing_ms: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.mean_conf = float(self.mean_conf)
@@ -163,11 +165,13 @@ def run_from_array(
         "quad_override": quad_override is not None,
     }
     _dump(sess, "00_input.jpg", image_bgr)
+    _t: dict[str, float] = {"start": time.perf_counter()}
 
     if quad_override is not None and quad_override.shape == (4, 2):
         warped = detector.warp_to_document(image_bgr, quad_override.astype(np.float32))
         det_detected = True
         det_score = 1.0
+        quad_used_list: Optional[list[list[float]]] = quad_override.astype(float).tolist()
         meta["detection"] = {
             "document_detected": True,
             "score": 1.0,
@@ -187,11 +191,14 @@ def run_from_array(
         det_score = det.score
         if det.document_detected and det.quad is not None:
             warped = detector.warp_to_document(image_bgr, det.quad)
+            quad_used_list = det.quad.astype(float).tolist()
             overlay = image_bgr.copy()
             cv2.polylines(overlay, [det.quad.astype(np.int32)], True, (0, 255, 0), 3)
             _dump(sess, "02_quad_overlay.jpg", overlay)
         else:
             warped = image_bgr.copy()
+            quad_used_list = None
+    _t["detect_warp"] = time.perf_counter()
 
     h_w, w_w = warped.shape[:2]
     longest = max(h_w, w_w)
@@ -209,6 +216,7 @@ def run_from_array(
     _dump(sess, "05_deskewed.jpg", warped)
     warped = detector.normalize_dpi(warped)
     _dump(sess, "06_dpi_normalized.jpg", warped)
+    _t["orient_deskew_dpi"] = time.perf_counter()
 
     raw_full = image_bgr
 
@@ -225,6 +233,7 @@ def run_from_array(
         enhanced_bytes, enhanced_mime = scanner_enhance.encode(
             enhanced_img, enhance_mode_used, quality=enhance_quality
         )
+        _t["user_enhance"] = time.perf_counter()
 
     if skip_ocr:
         crop_jpg: Optional[bytes] = None
@@ -234,6 +243,13 @@ def run_from_array(
                 crop_jpg = bytes(buf)
         meta["skipped_ocr"] = True
         _dump_meta(sess, meta)
+        _timing_ms = {}
+        prev = _t["start"]
+        for k in ("detect_warp", "orient_deskew_dpi", "user_enhance"):
+            if k in _t:
+                _timing_ms[k] = round((_t[k] - prev) * 1000, 1)
+                prev = _t[k]
+        _timing_ms["total"] = sum(_timing_ms.values())
         return PipelineResult(
             text="",
             mean_conf=0.0,
@@ -249,6 +265,8 @@ def run_from_array(
             ocr_engine_used=ocr_engine,
             crop_jpg=crop_jpg,
             enhanced_bytes=enhanced_bytes,
+            quad_used=quad_used_list,
+            timing_ms=_timing_ms,
         )
 
     engine_used = ocr_engine
@@ -256,6 +274,7 @@ def run_from_array(
     _dump(sess, "07_gray_path.jpg", gray_path)
     bin_path = enhancer.binarized_path(warped)
     _dump(sess, "08_binary_path.jpg", bin_path)
+    _t["ocr_enhance"] = time.perf_counter()
 
     printed_imgs = {"gray": gray_path, "binary": bin_path, "raw": raw_full}
     if ocr_engine == "from_scratch":
@@ -273,6 +292,7 @@ def run_from_array(
         best, alts = ocr.run_printed(
             printed_imgs, lang=lang, spell_check=spell_check
         )
+    _t["ocr"] = time.perf_counter()
 
     warning: Optional[str] = None
     if best.mean_conf < 50:
@@ -304,6 +324,14 @@ def run_from_array(
     meta["engine_used"] = engine_used
     _dump_meta(sess, meta)
 
+    _timing_ms = {}
+    prev = _t["start"]
+    for k in ("detect_warp", "orient_deskew_dpi", "user_enhance", "ocr_enhance", "ocr"):
+        if k in _t:
+            _timing_ms[k] = round((_t[k] - prev) * 1000, 1)
+            prev = _t[k]
+    _timing_ms["total"] = sum(_timing_ms.values())
+
     return PipelineResult(
         text=best.text,
         mean_conf=best.mean_conf,
@@ -329,4 +357,6 @@ def run_from_array(
         ocr_engine_used=engine_used,
         crop_jpg=crop_jpg,
         enhanced_bytes=enhanced_bytes,
+        quad_used=quad_used_list,
+        timing_ms=_timing_ms,
     )
